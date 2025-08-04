@@ -687,45 +687,39 @@ async function scanPosts() {
         engagedPosts++;
 
         // Get the current post's poster profile URL
-        // const posterProfileUrl = await getCurrentPostPosterProfileUrl();
-        // updateLocalStorageObject("topic_eng_data", {
-        //   posterProfileUrl: posterProfileUrl, // Store the poster's profile URL
-        // });
+        const posterProfileUrl = await getCurrentPostPosterProfileUrl();
+        updateLocalStorageObject("topic_eng_data", {
+          posterProfileUrl: posterProfileUrl, // Store the poster's profile URL
+        });
 
         // Determine redirect based on success states
-        // let redirectUrl;
-        // if (
-        //   contactCreated &&
-        //   likeSuccess &&
-        //   (commentSuccess || !shouldPostComment)
-        // ) {
-        //   // Contact success + Like success + (Comment success OR no comment needed)
-        //   redirectUrl = posterProfileUrl;
-        // } else if (
-        //   contactCreated &&
-        //   likeSuccess &&
-        //   !commentSuccess &&
-        //   shouldPostComment
-        // ) {
-        //   // Contact success + Like success + Comment failed
-        //   redirectUrl = posterProfileUrl;
-        // } else {
-        //   // Any other case where contact succeeded but other operations had issues
-        //   redirectUrl = posterProfileUrl;
-        // }
+        let redirectUrl;
+        if (
+          contactCreated &&
+          likeSuccess &&
+          (commentSuccess || !shouldPostComment)
+        ) {
+          // Contact success + Like success + (Comment success OR no comment needed)
+          redirectUrl = posterProfileUrl;
+        } else if (
+          contactCreated &&
+          likeSuccess &&
+          !commentSuccess &&
+          shouldPostComment
+        ) {
+          // Contact success + Like success + Comment failed
+          redirectUrl = posterProfileUrl;
+        } else {
+          // Any other case where contact succeeded but other operations had issues
+          redirectUrl = posterProfileUrl;
+        }
 
         // Send message to background to handle delay and redirect
-        // chrome.runtime.sendMessage({
-        //   action: "DELAYED_FEED_REDIRECT",
-        //   minDelay,
-        //   maxDelay,
-        //   url: redirectUrl,
-        // });
         chrome.runtime.sendMessage({
           action: "DELAYED_FEED_REDIRECT",
           minDelay,
           maxDelay,
-          url: await getRandomTopicUrl(),
+          url: redirectUrl,
         });
       } catch (contactError) {
         console.log("Failed to create contact:", contactError);
