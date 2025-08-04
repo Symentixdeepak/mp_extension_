@@ -337,7 +337,11 @@ async function scanPosts() {
       if (!postId) continue;
 
       const hasEngaged = await tracker.getPostById(postId);
-      if (!!hasEngaged) continue;
+      if (hasEngaged) {
+        // If already engaged, redirect to feed and stop further processing
+        window.location.href = "https://www.linkedin.com/feed/";
+        return;
+      }
 
       // Mark as processed
       post.setAttribute("data-auto-commenter-processed", "true");
@@ -848,18 +852,27 @@ async function engageWithFirstScannedPost() {
       await waitForElement(postListSelector, 20000);
       const postContainers = document.querySelectorAll(postListSelector);
       let foundPostId = null;
+
       for (const post of postContainers) {
         const postId = getPostId(post);
-        if (!postId) continue;
+        if (!postId) continue; // Skip to next post if no ID found
+
         const hasEngaged = await tracker.getPostById(postId);
-        if (!!hasEngaged) continue;
+        if (hasEngaged) {
+          // If already engaged, redirect to feed and stop further processing
+          window.location.href = "https://www.linkedin.com/feed/";
+          return;
+        }
+
         foundPostId = postId;
-        break;
+        break; // Exit loop when eligible post is found
       }
+
       if (!foundPostId) {
         showNotification("No eligible post found to engage.", "warning");
         return;
       }
+
       // Redirect to the post page
       const postUrl = `https://www.linkedin.com/feed/update/${foundPostId}`;
       window.location.href = postUrl;
@@ -935,10 +948,11 @@ if (document.readyState === "loading") {
     const href = getProfileAnchorHref();
     if (!href) return;
 
-    const match = href.match(/\/in\/[^\/]+-(\d+)\/?/);
+    // Updated regex to capture alphanumeric IDs (including letters and numbers)
+    const match = href.match(/\/in\/[^\/]+-(\w+)\/?/);
     if (!match || !match[1]) return;
 
-    const numericId = match[1];
+    const profileId = match[1]; // Changed variable name for clarity
 
     chrome.storage.local.get(["user_info"], (result) => {
       if (chrome.runtime.lastError) {
@@ -946,16 +960,20 @@ if (document.readyState === "loading") {
         return;
       }
 
-      // If user_info doesn't exist, save it
-      if (!result.user_info) {
-        chrome.storage.local.set({ user_info: numericId }, () => {
+      // If user_info doesn't exist OR it doesn't match current profileId, save/update it
+      if (!result.user_info || result.user_info !== profileId) {
+        chrome.storage.local.set({ user_info: profileId }, () => {
           if (!chrome.runtime.lastError) {
-            console.log("✅ user_info saved:", numericId);
+            if (!result.user_info) {
+              console.log("✅ user_info saved:", profileId);
+            } else {
+              console.log("🔄 user_info updated from", result.user_info, "to", profileId);
+            }
             hasChecked = true; // Mark as checked so we don't do it again
           }
         });
       } else {
-        console.log("ℹ️ user_info already exists:", result.user_info);
+        console.log("ℹ️ user_info already matches current profile:", result.user_info);
         hasChecked = true; // Mark as checked
       }
     });
@@ -978,4 +996,3 @@ if (document.readyState === "loading") {
     subtree: true 
   });
 })();
-

@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = {
   minDelay: 5 * ONE_MINUTE,
   maxDelay: 10 * ONE_MINUTE,
   likePostEnabled: true,
-  userPrompt:`Match the tone without deviation;
+  userPrompt: `Match the tone without deviation;
   be supportive, non-aggressive, and use direct address ('you'/'your');
   keep the comment WITHIN {{MAX_WORDS}} words;
   be engaging;
@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
   ask questions about the post only if needed;
   Successful comment example Output: Good to hear you’ve learned the MERN stack!`,
   isFeedCommenterActive: true,
-  isTopicCommenterActive:false
+  isTopicCommenterActive: false,
 };
 
 const defaultStartPrompt = `You are a professional comment generator. You will generate a concise, professional, and personalized comment based on the user's post. 
@@ -34,6 +34,15 @@ If the post contains profanity, hate speech, slurs, or violates content policies
 Output should not contain any explanations, markdown, or extra text.  
 Failed comment example output: NULL`;
 
+const topicSystemPrompt = `You are an AI assistant that helps determine if a LinkedIn post is relevant to a user's business goals.
+Instructions:
+- Read the user's business goal.
+- Read the LinkedIn post content.
+- Decide if the post is a good opportunity based on the goal.
+- mark it relevant only if it is very highly relevant.
+- Respond ONLY with one of the following and also explain why:
+  - Relevant
+  - Not Relevant`;
 
 const CommentLengthToWordsLength = {
   short: "30",
@@ -54,6 +63,7 @@ module.exports = {
   ONE_SECOND,
   ONE_MINUTE,
   CommentLengthToWordsLength,
+  topicSystemPrompt,
   defaultStartPrompt,
   defaultEndPrompt,
 

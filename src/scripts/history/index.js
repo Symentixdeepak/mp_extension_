@@ -50,6 +50,7 @@ if (!window.historyManagerInitialized) {
         content.classList.remove("active");
       });
       const activeContent = document.getElementById(tabId);
+      console.log(`Active content element:`, activeContent);
       if (activeContent) {
         activeContent.classList.add("active");
       } else {
@@ -77,6 +78,12 @@ if (!window.historyManagerInitialized) {
           window.engagementActivityManagerInstance.initializeIfNeeded();
         } else {
           showNotification("Error loading engagement activity.", "error");
+        }
+      } else if (tabId === "topic") {
+        if (window.topicListManagerInstance) {
+          window.topicListManagerInstance.initializeIfNeeded();
+        } else {
+          showNotification("Error loading topic list.", "error");
         }
       }
     }
@@ -416,7 +423,339 @@ if (!window.historyManagerInitialized) {
       }
     }
   }
+  class TopicListManager {
+    constructor() {
+      this.token = null;
+      this.sessionId = null;
+      this.boards = [];
+      this.currentBusinessId = null;
+      this.topicsContainer = document.getElementById("topic-list-content");
+      this.workspaceSelect = document.getElementById("topicTabBoardSelect");
+      this.titleElement = document.getElementById("topic-list-title");
+      this.addTopicBtn = null;
+      this.addTopicPopover = null;
+      this.initWorkspaceSelectListener();
+      this.renderAddTopicButton();
+    }
 
+    initWorkspaceSelectListener() {
+      if (this.workspaceSelect) {
+        this.workspaceSelect.addEventListener("change", () => {
+          this.currentBusinessId = this.workspaceSelect.value;
+          this.fetchAndDisplayTopics();
+        });
+      }
+    }
+
+    renderAddTopicButton() {
+      // Insert Add Topic button above the topic list
+      const container = document.getElementById("topic-list-controls");
+      if (!container) return;
+      if (document.getElementById("add-topic-btn")) return; // Prevent duplicate
+      this.addTopicBtn = document.createElement("button");
+      this.addTopicBtn.id = "add-topic-btn";
+      this.addTopicBtn.style.backgroundColor = "#101112";
+      this.addTopicBtn.className =
+        "primary-btn px-4 py-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50";
+      this.addTopicBtn.textContent = "+ Add Topic";
+      container.appendChild(this.addTopicBtn);
+      this.addTopicBtn.addEventListener("click", () =>
+        this.showAddTopicPopover()
+      );
+    }
+
+    showAddTopicPopover() {
+      // Remove existing popover if any
+      if (this.addTopicPopover) {
+        this.addTopicPopover.remove();
+      }
+      // Create popover/modal
+      this.addTopicPopover = document.createElement("div");
+      this.addTopicPopover.className =
+        "fixed inset-0 flex items-center justify-center z-50";
+      this.addTopicPopover.style.background = "rgba(0,0,0,0.2)";
+      this.addTopicPopover.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-4 w-full max-w-md relative">
+          <button class="absolute top-2 right-2 text-gray-500 hover:text-gray-700" id="close-add-topic-popover" title="Close" style="background:none;border:none;font-size:1.5rem;">&times;</button>
+          <h2 class="text-lg font-bold mb-4">Add Topic</h2>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Workspace</label>
+            <select id="add-topic-board-select" class="w-full border rounded p-2"></select>
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Keyword</label>
+            <input type="text" id="add-topic-keyword" class="w-full border rounded p-2" placeholder="Enter keyword" />
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm font-medium mb-1">Prompt</label>
+            <textarea id="add-topic-prompt" class="w-full border rounded p-2" rows="8"></textarea>
+          </div>
+          <div style="text-align: right;">
+
+          <button id="save-add-topic-btn" style="background-color: #101112" class="primary-btn px-4 py-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">Save</button>
+      </div>
+          </div>
+      `;
+      document.body.appendChild(this.addTopicPopover);
+
+      // Populate boards select
+      const boardSelect = this.addTopicPopover.querySelector(
+        "#add-topic-board-select"
+      );
+      if (boardSelect) {
+        boardSelect.innerHTML = this.boards.length
+          ? this.boards
+              .map(
+                (b) =>
+                  `<option value="${b.business_id}">${b.business_title}</option>`
+              )
+              .join("")
+          : '<option value="">No workspaces found</option>';
+      }
+      // Set default prompt
+      const promptArea =
+        this.addTopicPopover.querySelector("#add-topic-prompt");
+      if (promptArea) {
+        // Try both window.DEFAULT_SETTINGS.userPrompt and window.DEFAULT_SETTINGS["userPrompt"]
+        let defaultPrompt = "";
+        if (DEFAULT_SETTINGS) {
+          defaultPrompt =
+            DEFAULT_SETTINGS.userPrompt || DEFAULT_SETTINGS["userPrompt"] || "";
+        }
+        promptArea.value = defaultPrompt;
+      }
+
+      // Close button
+      this.addTopicPopover
+        .querySelector("#close-add-topic-popover")
+        .addEventListener("click", () => {
+          this.addTopicPopover.remove();
+        });
+
+      // Save button
+      this.addTopicPopover
+        .querySelector("#save-add-topic-btn")
+        .addEventListener("click", async () => {
+          const selectedBid = boardSelect.value;
+          const keyword = this.addTopicPopover
+            .querySelector("#add-topic-keyword")
+            .value.trim();
+          const prompt = promptArea.value;
+          if (!selectedBid || !keyword || !prompt) {
+            showNotification("All fields are required.", "error");
+            return;
+          }
+          // Build URL
+          const url = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
+            keyword
+          )}&origin=SWITCH_SEARCH_VERTICAL`;
+          // Get linkedin profile id
+          const lkdn_profile_id = this.sessionId;
+          if (!lkdn_profile_id) {
+            showNotification("Session ID not found.", "error");
+            return;
+          }
+          // Prepare payload
+          const payload = {
+            url,
+            lkdn_profile_id,
+            prompt,
+          };
+          // Get token
+          if (!this.token) {
+            this.token = await getAuthToken();
+          }
+          // Call API
+          try {
+            const response = await fetch(
+              `${APIURL}/linkedin-topic`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${this.token}`,
+                  "b-id": selectedBid,
+                },
+                body: JSON.stringify(payload),
+              }
+            );
+            if (!response.ok) throw new Error("Failed to add topic");
+            showNotification("Topic added successfully!", "success");
+            this.addTopicPopover.remove();
+            await this.fetchAndDisplayTopics();
+          } catch (err) {
+            showNotification("Error adding topic.", "error");
+          }
+        });
+    }
+
+    async initializeIfNeeded() {
+      if (this.titleElement) {
+        this.titleElement.textContent = "Topic List";
+      }
+      if (!this.topicsContainer) return;
+      this.topicsContainer.innerHTML = `<p class='text-gray-500'>Loading topics...</p>`;
+      await this.loadSessionIdAndBoards();
+    }
+
+    async loadSessionIdAndBoards() {
+      try {
+        const storage = await chrome.storage.local.get(["user_info"]);
+        const userInfo = storage.user_info;
+        if (!userInfo) {
+          this.topicsContainer.innerHTML = `<p class='text-red-500'>Session ID not found. Please login.</p>`;
+          return;
+        }
+        this.sessionId = userInfo;
+        await this.fetchAndPopulateBoards();
+      } catch (err) {
+        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading session ID.</p>`;
+      }
+    }
+
+    async fetchAndPopulateBoards() {
+      try {
+        if (!this.token) {
+          this.token = await getAuthToken();
+        }
+        const response = await fetch(`${APIURL}/user/me`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        if (!response.ok) throw new Error("Failed to fetch workspaces");
+        const data = await response.json();
+        this.boards = data.data.businesses || [];
+        this.populateBoardsSelect(this.boards);
+        // Auto-select first board if available
+        if (this.boards.length > 0) {
+          this.workspaceSelect.value = this.boards[0]?.business_id;
+          this.currentBusinessId = this.boards[0].business_id;
+          await this.fetchAndDisplayTopics();
+        } else {
+          this.topicsContainer.innerHTML = `<p class='text-gray-500'>No workspaces found.</p>`;
+        }
+      } catch (err) {
+        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading workspaces.</p>`;
+      }
+    }
+
+    populateBoardsSelect(boards) {
+      if (!this.workspaceSelect) return;
+      this.workspaceSelect.innerHTML = boards.length
+        ? boards
+            .map(
+              (b) =>
+                `<option value="${b.business_id}">${b.business_title}</option>`
+            )
+            .join("")
+        : '<option value="">No workspaces found</option>';
+    }
+
+    async fetchAndDisplayTopics() {
+      if (!this.token) {
+        this.token = await getAuthToken();
+      }
+      if (!this.sessionId || !this.currentBusinessId) {
+        this.topicsContainer.innerHTML = `<p class='text-gray-500'>Select a workspace to view topics.</p>`;
+        return;
+      }
+      try {
+        const url = `${APIURL}/linkedin-topic/list?lkdn_profile_id=${encodeURIComponent(
+          this.sessionId
+        )}&rows_per_page=100&page_no=1&order_by=desc&business_id=${this.currentBusinessId}`;
+        const response = await fetch(url, {
+          headers: {
+            "b-id": this.currentBusinessId,
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+        if (!response.ok) throw new Error("Failed to fetch topics");
+        const data = await response.json();
+        const topics = data.data?.rows || [];
+        console.log("Fetched topics:", topics);
+        this.renderTopics(topics);
+      } catch (err) {
+        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading topics.</p>`;
+      }
+    }
+
+    renderTopics(topics) {
+      if (!topics.length) {
+        this.topicsContainer.innerHTML = `<p class='text-gray-500'>No topics found.</p>`;
+        return;
+      }
+      this.topicsContainer.innerHTML = `
+      <div class="topic-list-wrapper">
+        ${topics
+          .map(
+            (topic) => `
+              <div class="topic-item bg-white p-3 rounded-lg border border-gray-200 mb-2">
+                <div class="flex justify-between items-center">
+                  <div>
+                    <h3 class="font-medium text-gray-900">${
+                      topic.url || "Unnamed Topic"
+                    }</h3>
+                    <p class="text-xs text-gray-500">${
+                      topic.created_at
+                        ? new Date(topic.created_at).toLocaleString()
+                        : ""
+                    }</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm text-gray-600">${
+                      topic.status || ""
+                    }</span>
+                    <button class="delete-topic-btn" title="Delete Topic" data-topic-id="${
+                      topic._id
+                    }" data-business-id="${
+              topic.business_id
+            }" style="background: none; border: none; cursor: pointer;">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                </div>
+                <p class="text-sm text-gray-700 mt-1" style="white-space: pre-wrap;">Prompt: ${
+                  topic.prompt || "No description"
+                }</p>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+      // Add delete event listeners
+      this.topicsContainer
+        .querySelectorAll(".delete-topic-btn")
+        .forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const topicId = btn.getAttribute("data-topic-id");
+            const businessId = btn.getAttribute("data-business-id");
+            if (!topicId || !businessId) return;
+            if (!confirm("Are you sure you want to delete this topic?")) return;
+            await this.deleteTopic(topicId, businessId);
+          });
+        });
+    }
+
+    async deleteTopic(topicId, businessId) {
+      if (!this.token) {
+        this.token = await getAuthToken();
+      }
+      try {
+        const response = await fetch(`${APIURL}/linkedin-topic/${topicId}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "b-id": businessId,
+          },
+        });
+        if (!response.ok) throw new Error("Failed to delete topic");
+        showNotification("Topic deleted successfully!", "success");
+        await this.fetchAndDisplayTopics();
+      } catch (err) {
+        showNotification("Error deleting topic.", "error");
+      }
+    }
+  }
   // --- List Segment Management Class ---
   class ListSegmentManager {
     constructor() {
@@ -837,7 +1176,6 @@ class="edit-prompt-btn text-sm bg-transparent text-gray-800 border border-[#dfdf
             );
           }
           // Apply base styles if button is disabled by another engagement
-         
         });
     }
 
@@ -1532,7 +1870,8 @@ class="edit-prompt-btn text-sm bg-transparent text-gray-800 border border-[#dfdf
           link.textContent = customer?.customer_id?.mp_customer_linkedin_profile
             ? "View Profile"
             : "-";
-          link.className = "text-black-600 hover:text-black-800 hover:underline";
+          link.className =
+            "text-black-600 hover:text-black-800 hover:underline";
           linkedinCell.appendChild(link);
         } else {
           linkedinCell.textContent = "-";
@@ -2289,6 +2628,9 @@ ${
   }
   if (!window.engagementActivityManagerInstance) {
     window.engagementActivityManagerInstance = new EngagementActivityManager();
+  }
+  if (!window.topicListManagerInstance) {
+    window.topicListManagerInstance = new TopicListManager();
   }
 
   // --- Remove the DOMContentLoaded listener if you had it ---

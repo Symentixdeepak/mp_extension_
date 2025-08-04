@@ -9,6 +9,7 @@ const {
   fetchTopicList,
   getAuthToken,
   updateLocalStorageObject,
+  getRandomTopicUrl,
 } = require("../../utils/utils");
 
 import * as engagementWorker from "./engagementWorker"; // Adjust path as needed
@@ -128,14 +129,17 @@ async function handleActivityApiCall(payload) {
     postId,
     activityId,
     isAutoPost,
+    message,
     comment, // This will be used for comments
   } = payload;
 
   const isUpdate = !!activityId;
-  const method = isUpdate ? "PATCH" : "POST";
-  const apiUrl = isUpdate
-    ? `${APIURL}/activity/${activityId}`
-    : `${APIURL}/activity?type=36`;
+  const method =
+    engagement_type === "like" ? "POST" : isUpdate ? "PATCH" : "POST";
+  const apiUrl =
+    isUpdate && engagement_type !== "like"
+      ? `${APIURL}/activity/${activityId}`
+      : `${APIURL}/activity?type=36`;
 
   const patchPayload = {
     activity_type: 36,
@@ -146,6 +150,14 @@ async function handleActivityApiCall(payload) {
             content: {
               profile_visited: true,
               profile_visit_date: new Date().toISOString(),
+            },
+          }
+        : engagement_type === "connectionsent"
+        ? {
+            content: {
+              conn_req_sent: true,
+              conn_req_sent_date: new Date().toISOString(),
+              message: message ? message : null,
             },
           }
         : {
@@ -328,12 +340,57 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
           // }
         }
         // If response is ok, set feed_commenter_active to false and topic_commenter_active to true
-        if (data && (data.success === undefined || data.success === true)) {
-          chrome.storage.local.set({
-            feed_commenter_active: false,
-            topic_commenter_active: true,
-          });
+
+        sendResponse(data);
+      })
+      .catch((error) => {
+        console.log("error in background.js > API_POST_GENERATE_COMMENT ", {
+          error,
+        });
+        sendResponse({
+          success: false, // Ensure consistent error response
+          error: error,
+        });
+        if (request.isEngagement) {
+          engagementWorker.advanceToNextCustomer("error");
         }
+      });
+    return true; // Indicates asynchronous response for API_POST_GENERATE_COMMENT
+  } else if (request.action === "API_POST_GENERATE_MESSAGE") {
+    console.log("Running background for API_POST_GENERATE_COMMENT");
+    const senderTabId = sender && sender.tab ? sender.tab.id : null;
+
+    fetch(request.url, {
+      method: request.method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${request.authToken}`,
+        "b-id": request?.businessId,
+      },
+      body: request.body,
+    })
+      .then((response) => response.json())
+      .then(async (data) => {
+        // Make this async to wait for tab activation
+        if (
+          senderTabId &&
+          (data.success === undefined || data.success === true)
+        ) {
+          // Only activate if API call was likely successful and tab ID exists
+          // try {
+          //   console.log(`Activating tab ${senderTabId} before sending generated comment.`);
+          //   await chrome.tabs.update(senderTabId, { active: true });
+          //   // Optionally, also focus the window containing the tab
+          //   const tabInfo = await chrome.tabs.get(senderTabId);
+          //   if (tabInfo && tabInfo.windowId) {
+          //     await chrome.windows.update(tabInfo.windowId, { focused: true });
+          //   }
+          // } catch (e) {
+          //   console.error(`Error activating tab ${senderTabId} or its window:`, e.message);
+          // }
+        }
+        // If response is ok, set feed_commenter_active to false and topic_commenter_active to true
+
         sendResponse(data);
       })
       .catch((error) => {
@@ -447,6 +504,32 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     handleActivityApiCall(request.payload);
     sendResponse({ success: true });
     return true;
+  } else if (request.action === "OPEN_OPTIONS_PAGE") {
+    try {
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Failed to open options page:",
+            chrome.runtime.lastError
+          );
+          sendResponse({
+            success: false,
+            error: chrome.runtime.lastError.message,
+          });
+        } else {
+          console.log("Options page opened successfully");
+          sendResponse({ success: true });
+        }
+      });
+
+      // IMPORTANT: Return true to keep the message channel open for async response
+      return true;
+    } catch (error) {
+      console.error("Exception in openOptionsPage:", error);
+      sendResponse({ success: false, error: error.message });
+      return true;
+    }
+    return true;
   } else if (request.action === "CHECK_POST_ENGAGEMENT") {
     checkPostEngagementAPI(request.postId)
       .then((result) => {
@@ -511,7 +594,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
           }
 
           try {
-            const { url, sessionId, promptValue } = request;
+            const { url, sessionId, promptValue, contactTypeId, businessGoal } =
+              request;
             const response = await fetch(`${APIURL}/linkedin-topic`, {
               method: "POST",
               headers: {
@@ -524,6 +608,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 url,
                 lkdn_profile_id: sessionId,
                 prompt: promptValue,
+                list_id: contactTypeId,
+                goal_prompt: businessGoal || "",
               }),
             });
 
@@ -536,6 +622,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
             const data = await response.json();
             sendResponse({ success: true, data });
+            chrome.tabs.reload();
           } catch (error) {
             console.error("Error in background addTopicToList:", error);
             sendResponse({ success: false, error: error.message });
@@ -556,6 +643,42 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     fetchContactTypesBG(request.token, request.businessId)
       .then((data) => sendResponse({ success: true, data }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true; // Indicates asynchronous response
+  } else if (request.action === "FETCH_CONTACT_TYPES_BG_TOPIC") {
+    chrome.cookies.get(
+      { url: WEBURL, name: "hash_mg_value" },
+      async (cookie) => {
+        const token = cookie?.value;
+        if (!token) {
+          sendResponse({ success: false, error: "Token not found" });
+          return;
+        }
+        fetchSegmentListBG(token, request.businessId)
+          .then((data) => sendResponse({ success: true, data }))
+          .catch((error) =>
+            sendResponse({ success: false, error: error.message })
+          );
+      }
+    );
+
+    return true; // Indicates asynchronous response
+  } else if (request.action === "CREATE_CONTACT_TYPE_BG") {
+    chrome.cookies.get(
+      { url: WEBURL, name: "hash_mg_value" },
+      async (cookie) => {
+        const token = cookie?.value;
+        if (!token) {
+          sendResponse({ success: false, error: "Token not found" });
+          return;
+        }
+        saveSegmentList(token, request.businessId, request.name)
+          .then((data) => sendResponse({ success: true, data }))
+          .catch((error) =>
+            sendResponse({ success: false, error: error.message })
+          );
+      }
+    );
+
     return true; // Indicates asynchronous response
   } else if (request.action === "FETCH_SEGMENT_LIST_BG") {
     if (!request.token || !request.businessId) {
@@ -653,13 +776,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               contactTypesData?.data?.rows &&
               contactTypesData.data.rows.length > 0
             ) {
-              lifecycleStageId = contactTypesData.data.rows[0]._id;
+              const contactType = contactTypesData.data.rows.find(
+                (type) => type.name === "Prospects"
+              );
+              lifecycleStageId = contactType?._id;
               console.log("Using lifecycle stage ID:", lifecycleStageId);
             } else {
               console.warn("No contact types/lifecycle stages found");
             }
 
-            // Now create the contact with lifecycle stage
+            // Create the contact with lifecycle stage
             const response = await fetch(
               `${APIURL}/customer?identifier=mp_customer_linkedin_profile`,
               {
@@ -681,8 +807,56 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             if (!response.ok) throw new Error(`API error: ${response.status}`);
 
-            const data = await response.json();
-            sendResponse({ success: true, data });
+            const contactData = await response.json();
+            const createdContactId = contactData?.data?.data?._id;
+
+            if (!createdContactId) {
+              throw new Error("Failed to get created contact ID from response");
+            }
+
+            console.log(
+              "Contact created successfully with ID:",
+              createdContactId
+            );
+
+            // **NEW: Add contact to segmentation if list_id is provided**
+            if (request.data.list_id) {
+              console.log("Adding contact to segment:", request.data.list_id);
+
+              const segmentationResponse = await fetch(
+                `${APIURL}/segmentation/customers`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                    "b-id": bid,
+                  },
+                  body: JSON.stringify({
+                    customer_ids: [createdContactId],
+                    segment_ids: [request.data.list_id],
+                  }),
+                }
+              );
+
+              if (!segmentationResponse.ok) {
+                console.error(
+                  `Segmentation API error: ${segmentationResponse.status}`
+                );
+                // Don't throw error here - contact was created successfully
+                // Just log the segmentation failure
+                console.warn("Contact created but failed to add to segment");
+              } else {
+                const segmentationData = await segmentationResponse.json();
+                console.log(
+                  "Contact successfully added to segment:",
+                  segmentationData
+                );
+              }
+            }
+
+            // Return the original contact creation response
+            sendResponse({ success: true, data: contactData });
           } catch (error) {
             console.error("Error in background createContact:", error);
             sendResponse({ success: false, error: error.message });
@@ -713,7 +887,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             // Now create the contact with lifecycle stage
             const response = await fetch(
-              `${APIURL}/customer/${request.data.contact_id}`,
+              `${APIURL}/customer/${request.data.contact_id}?identifier=mp_customer_linkedin_profile`,
               {
                 method: "PUT",
                 headers: {
@@ -1366,6 +1540,36 @@ async function fetchSegmentListBG(token, businessId) {
   return await response.json();
 }
 
+async function saveSegmentList(token, businessId, name) {
+  const payload = {
+    name: name,
+    type: 1,
+    archive_date: new Date().toISOString(),
+  };
+  const response = await fetch(`${APIURL}/segmentation`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "b-id": businessId,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let errorDetails = `HTTP error ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorDetails =
+        errorData.message || JSON.stringify(errorData) || errorDetails;
+    } catch (e) {
+      /* Ignore if parsing error body fails */
+    }
+    console.error("Background: Segment list loading failed:", errorDetails);
+    throw new Error(`Segment list loading failed: ${errorDetails}`);
+  }
+  return await response.json();
+}
+
 // --- Periodically fetch topic list and store in chrome.storage.local ---
 async function fetchAndStoreTopicList() {
   try {
@@ -1416,6 +1620,42 @@ function isLinkedInNonTopic(url) {
     !url.includes("linkedin.com/search/results/content")
   );
 }
+
+// Add these to your background.js if not already there:
+
+async function getLinkedInSessionId() {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(["user_info"], (result) => {
+      if (chrome.runtime.lastError) {
+        return reject(chrome.runtime.lastError);
+      }
+      const userInfo = result.user_info;
+      if (!userInfo) {
+        return reject("user_info not found");
+      }
+      resolve(userInfo);
+    });
+  });
+}
+
+function getRandomUrlFromTopicList(topicList) {
+  if (!topicList || !topicList.data || !Array.isArray(topicList.data.rows)) {
+    return null;
+  }
+
+  const urls = topicList.data.rows
+    .map((topic) => topic.url)
+    .filter((url) => url);
+
+  if (urls.length === 0) {
+    return null;
+  }
+
+  const randomIndex = Math.floor(Math.random() * urls.length);
+  return urls[randomIndex];
+}
+
+// fetchTopicList should already be available if you imported utils.js
 
 setInterval(() => {
   chrome.storage.local.get(
@@ -1483,7 +1723,10 @@ setInterval(() => {
                       isLinkedInNonTopic(tab.url)
                     );
                     if (tabToRedirect) {
-                      redirectUrl = await getRandomTopicUrl();
+                      const sessionId = await getLinkedInSessionId();
+                      const topicList = await fetchTopicList(sessionId);
+                      redirectUrl = getRandomUrlFromTopicList(topicList);
+
                       console.log(
                         `User not on LinkedIn tab for >1min. Redirecting non-topic LinkedIn tab ${tabToRedirect.id} (${tabToRedirect.url}) to topic: ${redirectUrl}.`
                       );
@@ -1577,7 +1820,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
           "https://www.linkedin.com/feed/",
           "*://www.linkedin.com/search/results/content*",
         ];
-        redirectUrl = await getRandomTopicUrl(); // Get random topic URL
+        const sessionId = await getLinkedInSessionId();
+        const topicList = await fetchTopicList(sessionId);
+        redirectUrl = getRandomUrlFromTopicList(topicList);
         console.log("Topic commenter active - will redirect to:", redirectUrl);
       } else if (feed_commenter_active && !topic_commenter_active) {
         // Feed commenter logic (only when feed is true AND topic is false)
@@ -1677,8 +1922,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
             // Determine redirect URL based on active commenter
             if (topic_commenter_active) {
-              // Topic commenter logic (takes precedence if both are true)
-              redirectUrl = await getRandomTopicUrl();
+              const sessionId = await getLinkedInSessionId();
+              const topicList = await fetchTopicList(sessionId);
+              redirectUrl = getRandomUrlFromTopicList(topicList);
+
               console.log(
                 "Topic commenter active - redirecting to:",
                 redirectUrl
@@ -1711,14 +1958,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // --- Listen for getTopicList requests from content scripts ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log("Message received:", request.action); // Add this for debugging
+
   if (request && request.action === "getTopicList" && request.sessionId) {
+    console.log("Processing getTopicList for sessionId:", request.sessionId);
     fetchTopicList(request.sessionId)
       .then((list) => sendResponse({ success: true, data: list }))
       .catch((err) =>
         sendResponse({ success: false, error: err?.message || String(err) })
       );
-    // Indicate async response
     return true;
   }
-  // ...existing message handlers...dd
 });

@@ -24,6 +24,7 @@ const {
   APIURL,
   defaultStartPrompt,
   defaultEndPrompt,
+  topicSystemPrompt,
 } = require("../../utils/constant");
 const {
   simulateMouseClick,
@@ -48,6 +49,9 @@ let likePostEnabled = DEFAULT_SETTINGS.likePostEnabled;
 let commentLength = DEFAULT_SETTINGS.commentLength;
 let SELECTORS = null;
 let userPrompt = DEFAULT_SETTINGS.userPrompt;
+let isInitialized = false;
+let currentUrl = window.location.href;
+let initializationTimeout = null;
 
 // === Delay Management Utilities ===
 const NEXT_ENGAGEMENT_KEY = "mp_next_engagement_time";
@@ -191,7 +195,28 @@ async function isCurrentPageManagedTopic() {
               // Update local storage with the topic ID
               updateLocalStorageObject("topic_eng_data", {
                 topic_id: managedTopic._id,
+                goal_prompt: managedTopic.goal_prompt,
+                list_id: managedTopic.list_id,
               });
+              // Instead of updateLocalStorageObject calls, use chrome.storage.local.set
+              chrome.storage.local.set(
+                {
+                  selected_workspace: managedTopic?.business_id,
+                  topic_prompt: managedTopic?.prompt,
+                },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    console.error(
+                      "Chrome storage error:",
+                      chrome.runtime.lastError
+                    );
+                  } else {
+                    console.log(
+                      "✅ Workspace and topic prompt saved successfully"
+                    );
+                  }
+                }
+              );
 
               resolve({
                 isManaged: true,
@@ -223,8 +248,16 @@ const getAuthToken = () => {
 };
 
 // Initialize extension
+
 async function initialize() {
-  // console.log("LinkedIn Auto Commenter initialized");
+  // Prevent multiple initializations
+  if (isInitialized && currentUrl === window.location.href) {
+    console.log("Already initialized for this URL, skipping...");
+    return;
+  }
+
+  console.log("LinkedIn Auto Commenter initializing...");
+
   const statusData = await chrome.storage.local.get(["engagement_status"]);
   const engagementStatus = statusData.engagement_status;
   const isFeedCommenterActive = await chrome.storage.local.get([
@@ -235,12 +268,20 @@ async function initialize() {
     return;
   }
   const topicCheck = await isCurrentPageManagedTopic();
+  console.log({ topicCheck });
+
+  // Check if current URL matches LinkedIn feed update pattern or search results
+  const isFeedUpdatePage = window.location.pathname.startsWith("/feed/update/");
+  const isSearchResultsPage = window.location.pathname.startsWith(
+    "/search/results/content"
+  );
 
   // Return early (don't initialize) if any of these conditions are true:
+  // Note: Removed isSearchResultsPage from the condition so search results pages always proceed
   if (
     engagementStatus === "started" ||
     !isFeedCommenterActive?.topic_commenter_active ||
-    !topicCheck
+    (!topicCheck?.isManaged && !isFeedUpdatePage)
   ) {
     console.log("LinkedIn Auto Commenter: Initialization skipped.");
 
@@ -248,17 +289,12 @@ async function initialize() {
       console.log("Reason: Engagement status is 'started'");
     } else if (!isFeedCommenterActive?.topic_commenter_active) {
       console.log("Reason: Topic commenter is not active");
-    } else if (!topicCheck) {
-      console.log("Reason: Topic not managed");
+    } else if (!topicCheck?.isManaged && !isFeedUpdatePage) {
+      console.log("Reason: Topic not managed and not on feed update page");
     }
 
     return; // Exit - don't initialize
   }
-
-  // Continue with initialization only if ALL conditions are met:
-  // - engagementStatus is NOT "started"
-  // - topic_commenter_active is true
-  // - topicCheck is true
 
   // Load settings from storage
   async function refreshSettings() {
@@ -277,11 +313,11 @@ async function initialize() {
       "likePostEnabled",
       "commentLength",
       "userPrompt",
+      "topic_eng_data",
     ]);
 
-    console.log("refres setting starts...");
+    console.log("refresh setting starts...");
     extensionActive = data.active !== false;
-    // extensionActive = false;
 
     // Check if we need to reset daily counts
     const today = new Date().toDateString();
@@ -309,35 +345,41 @@ async function initialize() {
     useGPT = data.useGPT !== false;
     likePostEnabled = data.likePostEnabled !== false;
     commentLength = data.commentLength || DEFAULT_SETTINGS.commentLength;
-    userPrompt = data.userPrompt || DEFAULT_SETTINGS.userPrompt;
+    userPrompt =
+      data?.topic_eng_data?.prompt ||
+      data.userPrompt ||
+      DEFAULT_SETTINGS.userPrompt;
     console.log("refresh setting finished...", data);
   }
 
-  // async function initScan() {
   await refreshSettings();
   if (extensionActive) {
     await startScanning();
   }
-  // }
 
-  // Add message listener for popup communication
-  chrome.runtime.onMessage.addListener(async function (
-    request,
-    sender,
-    sendResponse
-  ) {
-    if (request.action === "updateActiveState") {
-      console.log("settings got update!!!");
-      // extensionActive = request.active;
-      console.log({ extensionActive });
-      await refreshSettings();
-      console.log({ extensionActive });
-      if (extensionActive && !isProcessing) {
-        await startScanning();
+  // Add message listener for popup communication (only once)
+  if (!isInitialized) {
+    chrome.runtime.onMessage.addListener(async function (
+      request,
+      sender,
+      sendResponse
+    ) {
+      if (request.action === "updateActiveState") {
+        console.log("settings got update!!!");
+        await refreshSettings();
+        console.log({ extensionActive });
+        if (extensionActive && !isProcessing) {
+          await startScanning();
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
+  }
+
+  // Set initialization flag to true at the end of successful initialization
+  isInitialized = true;
+  currentUrl = window.location.href;
+  console.log("LinkedIn Auto Commenter successfully initialized");
 }
 
 // Start scanning for posts
@@ -499,6 +541,7 @@ async function createContactInBackground(contactData) {
 }
 
 // Scan for celebration posts
+// Scan for celebration posts
 async function scanPosts() {
   // Select all posts on the feed
   const postContainers = document.querySelectorAll(SELECTORS.postList[0]);
@@ -567,26 +610,38 @@ async function scanPosts() {
 
       loadingNotification.closeNotification();
 
+      let shouldPostComment = true;
       if (!generatedComment || generatedComment?.includes("NULL")) {
-        showNotification("Failed to generate comment.", "error");
-        continue;
+        showNotification(
+          "Failed to generate comment, but continuing with engagement.",
+          "warning"
+        );
+        shouldPostComment = false;
+      } else {
+        showNotification("Comment generated!", "success");
       }
 
-      showNotification("Comment generated!", "success");
-
-      // Extract firstName, lastName, profile, and avatar before posting comment
+      // Extract firstName, lastName, profile, and avatar before engagement
       const { firstName, lastName } = extractFirstAndLastName(post);
       const mp_linkedinProfile = extractLinkedInProfile(post);
       const avatarUrl = extractAvatarUrl(post);
 
+      const topicEngData = await getFromChromeStorage("topic_eng_data", {});
+
+      if (!topicEngData?.list_id) {
+        // If topic engagement data is available, use it
+        return;
+      }
       try {
         const contactData = await createContactInBackground({
           firstName,
           lastName,
           mp_linkedinProfile,
+          list_id: topicEngData.list_id,
           avatar: avatarUrl, // Add avatar field if your API supports it
         });
         console.log("Contact created successfully:", contactData);
+        contactCreated = true;
 
         // Store contact data and post information in topic_eng_data
         updateLocalStorageObject("topic_eng_data", {
@@ -596,37 +651,106 @@ async function scanPosts() {
           current_post_id: postId,
         });
 
+        // Handle like
         if (likePostEnabled) {
-          await handleLikePost(post, contactData._id);
+          try {
+            await handleLikePost(post, contactData._id);
+            likeSuccess = true;
+          } catch (likeError) {
+            console.log("Failed to like post:", likeError);
+            likeSuccess = false;
+          }
+        } else {
+          likeSuccess = true; // Consider as success if liking is disabled
         }
 
         await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(2000, 3000)) // Shorter delay now
+          (resolve) => setTimeout(resolve, getRandomDelay(6000, 12000)) // Shorter delay now
         );
 
-        // Now pass the contact ID to postComment if needed
-        await postComment(post, generatedComment, contactData.id);
+        // Handle comment
+        if (shouldPostComment) {
+          try {
+            await postComment(post, generatedComment, contactData.id);
+            commentSuccess = true;
+            await new Promise(
+              (resolve) => setTimeout(resolve, getRandomDelay(2000, 3000)) // Shorter delay now
+            );
+          } catch (commentError) {
+            console.log("Failed to post comment:", commentError);
+            commentSuccess = false;
+          }
+        } else {
+          commentSuccess = false; // No comment to post
+        }
+
         engagedPosts++;
-      } catch (contactError) {
-        console.log("Failed to create contact:", contactError);
-        showNotification(
-          "Failed to create contact. Skipping comment.",
-          "error"
-        );
+
+        // Get the current post's poster profile URL
+        // const posterProfileUrl = await getCurrentPostPosterProfileUrl();
+        // updateLocalStorageObject("topic_eng_data", {
+        //   posterProfileUrl: posterProfileUrl, // Store the poster's profile URL
+        // });
+
+        // Determine redirect based on success states
+        // let redirectUrl;
+        // if (
+        //   contactCreated &&
+        //   likeSuccess &&
+        //   (commentSuccess || !shouldPostComment)
+        // ) {
+        //   // Contact success + Like success + (Comment success OR no comment needed)
+        //   redirectUrl = posterProfileUrl;
+        // } else if (
+        //   contactCreated &&
+        //   likeSuccess &&
+        //   !commentSuccess &&
+        //   shouldPostComment
+        // ) {
+        //   // Contact success + Like success + Comment failed
+        //   redirectUrl = posterProfileUrl;
+        // } else {
+        //   // Any other case where contact succeeded but other operations had issues
+        //   redirectUrl = posterProfileUrl;
+        // }
+
+        // Send message to background to handle delay and redirect
+        // chrome.runtime.sendMessage({
+        //   action: "DELAYED_FEED_REDIRECT",
+        //   minDelay,
+        //   maxDelay,
+        //   url: redirectUrl,
+        // });
         chrome.runtime.sendMessage({
           action: "DELAYED_FEED_REDIRECT",
           minDelay,
           maxDelay,
-          url: await getRandomTopicUrl(), // Add random topic URL
+          url: await getRandomTopicUrl(),
+        });
+      } catch (contactError) {
+        console.log("Failed to create contact:", contactError);
+        contactCreated = false;
+        showNotification(
+          "Failed to create contact. Redirecting to random topic.",
+          "error"
+        );
+
+        // Contact creation failed - redirect to random topic
+        chrome.runtime.sendMessage({
+          action: "DELAYED_FEED_REDIRECT",
+          minDelay,
+          maxDelay,
+          url: await getRandomTopicUrl(),
         });
         continue;
       }
     } catch (error) {
+      // General error - redirect to random topic
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
-        url: await getRandomTopicUrl(), // Add random topic URL
+        url: await getRandomTopicUrl(),
       });
       console.error("Error generating or posting comment:", error);
       showNotification("Error generating comment", "error");
@@ -1080,25 +1204,87 @@ async function checkIfPostEngaged(postId) {
         postId: postId,
       },
       (response) => {
-        console.log(
-          `Response from background for post ${postId}:`,
-          response
-        );
-        if (chrome.runtime.lastError) {
-          console.error(
-            "Error checking post engagement:",
-            chrome.runtime.lastError
-          );
-          resolve(false); // Assume not engaged on error
-          return;
-        }
+        console.log(`Response from background for post ${postId}:`, response);
 
-        // If we get any data back, consider it engaged
-        const isEngaged = response && response.success && response.data;
-        resolve(!!isEngaged);
+        // Check response.data.error to determine engagement status
+        if (response && response.data) {
+          console.log("response 1");
+          if (response.data.error === false) {
+            console.log("response 2");
+            resolve(false); // Not engaged when error is false
+          } else if (response.data.error === true) {
+            console.log("response 3");
+            resolve(true); // Engaged when error is true
+          } else {
+            console.log("response 4");
+            resolve(false); // Default to not engaged if error property is undefined
+          }
+        } else {
+          console.log("response 5");
+          resolve(false); // Default to not engaged if no data
+        }
       }
     );
   });
+}
+
+async function checkPostRelevance(postElement) {
+  try {
+    // Extract post content from the post element
+    const postContent = extractPostContent(postElement);
+    const topicEngData = await getFromChromeStorage("topic_eng_data", {});
+
+    // Validate that we have the required data
+    if (
+      !topicEngData.business_id ||
+      !topicEngData.topic_id ||
+      !topicEngData?.goal_prompt
+    ) {
+      console.error("Missing required topic engagement data:", topicEngData);
+      return;
+    }
+    if (!postContent) {
+      console.log("No post content found");
+      return null;
+    }
+
+    const userPrompt = `BUSINESS GOAL: ${topicEngData?.goal_prompt} 
+    LINKEDIN POST: ${postContent}`;
+
+    const body = JSON.stringify({
+      model: "llama3.1:latest",
+      messages: [
+        {
+          role: "system",
+          content: topicSystemPrompt,
+        },
+        { role: "user", content: postContent },
+      ],
+      options: {
+        max_token: 100,
+        repeat_penalty: 1.2,
+        temperature: 0.7,
+      },
+    });
+
+    const serverUrl = `${APIURL}/ai/chat`;
+
+    const data = await callApi({
+      action: "API_POST_GENERATE_MESSAGE",
+      url: serverUrl,
+      method: "POST",
+      body,
+    });
+
+    // Extract the relevance result from the API response
+    const relevanceResult = data?.response || data?.message || null;
+    console.log(`Relevance check result: ${relevanceResult}`);
+
+    return relevanceResult;
+  } catch (error) {
+    console.error("Error checking post relevance:", error);
+    return null; // Return null on error to skip the post
+  }
 }
 
 // Function to get the current post's poster profile URL
@@ -1152,7 +1338,6 @@ async function engageWithFirstScannedPost() {
   window.__mp_engaged_specific_post = true;
 
   // Wait for next allowed engagement time
-  await waitForNextEngagement(minDelay, maxDelay);
 
   // Wait for selectors to load
   SELECTORS = await getSelectors();
@@ -1167,6 +1352,7 @@ async function engageWithFirstScannedPost() {
   // If we're on the feed, scan for the first eligible post and redirect to it
   if (window.location.pathname?.startsWith("/search/results/content")) {
     try {
+      await waitForNextEngagement(minDelay, maxDelay);
       const postListSelector = SELECTORS.postList[0];
       await waitForElement(postListSelector, 20000);
       const postContainers = document.querySelectorAll(postListSelector);
@@ -1182,27 +1368,44 @@ async function engageWithFirstScannedPost() {
           `Checking post ${postId} engagement status...`,
           engagementResult
         );
+
         // If there's an error in the API response, skip this post
-        if (engagementResult && engagementResult.error === true) {
+        if (engagementResult === false) {
           console.log(`Post ${postId} has API error, skipping...`);
           continue; // Go to next post in the list
         }
 
-        // If there's engagement data (error = false), skip this post
-        if (engagementResult && engagementResult.error === false) {
-          console.log(`Post ${postId} already engaged, skipping...`);
+        // If no engagement data (null/undefined), check post relevance
+        console.log(`Checking post ${postId} relevance...`);
+        const relevanceResult = await checkPostRelevance(post);
+
+        // Skip if relevance check returns null or "Not Relevant"
+        if (
+          !relevanceResult ||
+          relevanceResult === null ||
+          !relevanceResult.toLowerCase().includes("relevant")
+        ) {
+          console.log(`Post ${postId} is not relevant, skipping...`);
           continue; // Go to next post in the list
         }
 
-        // If no engagement data (null/undefined), this post is eligible
+        // If we reach here, post is eligible and relevant
         foundPostId = postId;
+        console.log(`Found relevant post: ${postId}`);
         break; // Found eligible post, exit loop
       }
 
       if (!foundPostId) {
-        showNotification("No eligible post found to engage.", "warning");
+        showNotification(
+          "No eligible and relevant post found to engage.",
+          "warning"
+        );
         return;
       }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRandomDelay(5000, 10000))
+      );
 
       // Redirect to the post page
       const postUrl = `https://www.linkedin.com/feed/update/${foundPostId}`;
@@ -1213,7 +1416,6 @@ async function engageWithFirstScannedPost() {
       return;
     }
   }
-
   // If we're on a post page, run scanPosts to handle comment/like
   if (window.location.pathname.startsWith("/feed/update/")) {
     try {
@@ -1224,19 +1426,6 @@ async function engageWithFirstScannedPost() {
         setTimeout(resolve, getRandomDelay(1000, 2000))
       );
       await scanPosts();
-
-      // Get the current post's poster profile URL
-      const posterProfileUrl = await getCurrentPostPosterProfileUrl();
-      updateLocalStorageObject("topic_eng_data", {
-        posterProfileUrl: posterProfileUrl, // Store the poster's profile URL
-      });
-      // Send message to background to handle delay and redirect to poster's profile
-      chrome.runtime.sendMessage({
-        action: "DELAYED_FEED_REDIRECT",
-        minDelay,
-        maxDelay,
-        url: posterProfileUrl, // Pass the poster's profile URL
-      });
     } catch (e) {
       showNotification("Error engaging with post.", "error");
 
@@ -1253,26 +1442,68 @@ async function engageWithFirstScannedPost() {
   }
 }
 
-// === End custom workflow ===
+// Initial load
+function reinitialize() {
+  // Clear any existing timeout
+  if (initializationTimeout) {
+    clearTimeout(initializationTimeout);
+  }
 
-// Run the custom workflow after DOMContentLoaded
-// if (document.readyState === "loading") {
-//   document.addEventListener("DOMContentLoaded", engageWithFirstScannedPost);
-// } else {
-//   engageWithFirstScannedPost();
-// }
+  // Only reinitialize if URL actually changed
+  if (currentUrl !== window.location.href) {
+    console.log(`URL changed from ${currentUrl} to ${window.location.href}`);
+    isInitialized = false;
 
-// Initialize when document is loaded
+    // Debounce the initialization to prevent rapid calls
+    initializationTimeout = setTimeout(() => {
+      if (shouldInitialize()) {
+        initialize();
+      }
+    }, 500); // Increased delay to 500ms
+  }
+}
+
+function shouldInitialize() {
+  // Check if we're on a relevant LinkedIn page
+  const isLinkedIn = window.location.href.includes("linkedin.com");
+  const isFeed =
+    window.location.href.includes("feed") ||
+    window.location.pathname.startsWith("/feed/update/");
+  const isSearchResults = window.location.pathname.startsWith(
+    "/search/results/content"
+  );
+
+  console.log("Should initialize check:", {
+    isLinkedIn,
+    isFeed,
+    isSearchResults,
+  });
+  return isLinkedIn && (isFeed || isSearchResults);
+}
+
+// Initial load
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initialize);
 } else {
   initialize();
 }
 
-// Listen for redirect command from background
-// chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-//   if (request && request.action === "REDIRECT_TO_FEED") {
-//     window.location.href = "https://www.linkedin.com/feed/";
-//     window.location.reload();
-//   }
-// });
+// Handle SPA navigation with throttling
+let observerTimeout = null;
+const observer = new MutationObserver(() => {
+  // Throttle the observer to prevent excessive calls
+  if (observerTimeout) return;
+
+  observerTimeout = setTimeout(() => {
+    reinitialize();
+    observerTimeout = null;
+  }, 300); // 300ms throttle
+});
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+});
+
+// Also listen for navigation events as backup
+window.addEventListener("popstate", reinitialize);

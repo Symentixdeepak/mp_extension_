@@ -1,12 +1,22 @@
-// profile.js - LinkedIn Profile Scraper with improved data extraction
+// profile.js - LinkedIn Profile Scraper with GPT connection request message generation
 
+const { APIURL } = require("../../utils/constant");
 const { showNotification } = require("../../utils/notification");
 const {
   populateBoards,
   getRandomTopicUrl,
   setToChromeStorage,
   getFromChromeStorage,
+  getXLiTrackHeader,
+  getAcceptLanguage,
+  getXLiLang,
+  getSecChUaPlatform,
+  getSecChUaMobile,
+  getSecChUaHeader,
 } = require("../../utils/utils");
+
+const minDelay = 3000;
+const maxDelay = 4000;
 
 // Utility function to safely get text content and clean duplicates
 function getTextContent(selector, container = document) {
@@ -81,6 +91,12 @@ function extractDates(dateString) {
 // Extract poster profile URL
 function getCurrentProfileUrl() {
   return window.location.href;
+}
+
+// Extract vanity name from profile URL
+function getVanityName(profileUrl) {
+  const match = profileUrl.match(/\/in\/([^\/]+)/);
+  return match ? match[1] : "";
 }
 
 // Extract poster name
@@ -168,14 +184,23 @@ function getAvatar() {
 
 // Extract about section
 function getAbout() {
-  const aboutSelectors = [
-    '[data-view-name="profile-card"] .ZUjbVnUyeNIBDGDnoONvnCsSlUnEfTYiEco .full-width',
-    ".pv-about-section .pv-about__summary-text",
+  const xpathSelectors = [
+    "//section[@data-view-name='profile-card']//div[contains(@class, 'inline-show-more-text--is-collapsed')]//span[@aria-hidden='true']",
+    "//div[@id='about']/following-sibling::div//span[@aria-hidden='true']",
+    "//h2[contains(text(), 'About')]/ancestor::section//span[@aria-hidden='true' and string-length(text()) > 50]",
   ];
 
-  for (const selector of aboutSelectors) {
-    const about = getTextContent(selector);
-    if (about) return cleanDuplicateText(about);
+  for (const xpath of xpathSelectors) {
+    const element = document.evaluate(
+      xpath,
+      document,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    ).singleNodeValue;
+    if (element && element.textContent.trim()) {
+      return cleanDuplicateText(element.textContent);
+    }
   }
   return "";
 }
@@ -310,8 +335,203 @@ function getSkills() {
   return [...new Set(skillsList)];
 }
 
+// Get CSRF Token
+async function getCsrfToken() {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ action: "getCookie" }, (response) => {
+      if (response.error) {
+        reject(response.error);
+        console.log({ dfdfd: response });
+      } else {
+        // Clean the CSRF token by removing extra quotes
+        const rawCsrfToken = response.jsessionId;
+        const cleanedCsrfToken = rawCsrfToken ? JSON.parse(rawCsrfToken) : null;
+        console.log({ dfdf: rawCsrfToken, dfdaa: cleanedCsrfToken });
+        resolve(cleanedCsrfToken);
+      }
+    });
+  });
+}
+
+// Helper function for API calls
+async function callApi(config) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(config, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+// Generate GPT Connection Request Message function
+async function generateConnectionRequestMessage() {
+  try {
+    // Extract profile data
+    const { firstName, lastName } = getFirstLastName();
+    const jobTitle = getJobTitle();
+    const about = getAbout();
+
+    // Handle cases where profile data might be missing
+    const hasJobTitle = jobTitle && jobTitle.trim().length > 0;
+    const hasAbout = about && about.trim().length > 0;
+    const hasName = firstName && firstName.trim().length > 0;
+
+    // If no meaningful data is available, return null
+    if (!hasName && !hasJobTitle && !hasAbout) {
+      console.log(
+        "No meaningful profile data found for connection message generation"
+      );
+      return null;
+    }
+
+    // Create prompt with available profile data
+
+    // Build dynamic prompt based on available data
+    let profileInfo = `Name: ${firstName} ${lastName}`.trim();
+
+    if (hasJobTitle) {
+      profileInfo += `\nJob Title: ${jobTitle}`;
+    }
+
+    if (hasAbout) {
+      profileInfo += `\nAbout: ${about.substring(0, 200)}`;
+    }
+
+    const prompt = `Generate a professional LinkedIn connection request message for:
+${profileInfo}
+
+Create a personalized, professional connection request message in 10-15 words${
+      hasJobTitle || hasAbout
+        ? " that references their available profile information"
+        : " based on their name"
+    }.`;
+
+    const systemPrompt = `You are a professional LinkedIn connection request message generator. Generate personalized, professional connection request messages based on the person's profile data.
+
+Rules:
+1. Keep message between 10-15 words
+2. Be professional and friendly
+3. Reference their job title or background if available
+4. Make it personalized but not overly familiar
+5. Don't ask questions
+6. Use professional tone
+7. Output ONLY the message text, no quotes or explanations
+8. If unable to generate a proper message, return NULL
+
+Guidelines for different scenarios:
+- If job title is available: Reference their professional role
+- If only about section is available: Reference their background/interests
+- If only name is available: Create a general professional connection message
+- If no meaningful data: Return NULL
+
+Examples:
+- "Hi John, fellow software engineer interested in connecting and sharing insights."
+- "Hello Sarah, admire your marketing expertise, would love to connect professionally."
+- "Hi Mike, impressed by your data science background, let's connect and network."
+- "Hi Lisa, would love to connect and expand our professional network."
+`;
+
+    const body = JSON.stringify({
+      model: "llama3.1:latest",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        { role: "user", content: prompt },
+      ],
+      options: {
+        max_token: 100,
+        repeat_penalty: 1.2,
+        temperature: 0.7,
+      },
+    });
+
+    const serverUrl = `${APIURL}/ai/chat`;
+
+    const data = await callApi({
+      action: "API_POST_GENERATE_MESSAGE",
+      url: serverUrl,
+      method: "POST",
+      body,
+    });
+
+    console.log("GPT connection request response:", data);
+
+    if (data.error) {
+      console.error("GPT API error:", data.error);
+      return null;
+    }
+
+    const generatedMessage = data.data.data;
+
+    // Check if the response contains NULL or is invalid
+    if (
+      !generatedMessage ||
+      generatedMessage.toLowerCase().includes("null") ||
+      generatedMessage.toLowerCase().trim() === "null" ||
+      generatedMessage.trim().length === 0
+    ) {
+      console.log("GPT returned NULL or invalid message");
+      return null;
+    }
+
+    // Clean the message - remove quotes and trim
+    let cleanMessage = generatedMessage.trim();
+    if (
+      (cleanMessage.startsWith('"') && cleanMessage.endsWith('"')) ||
+      (cleanMessage.startsWith("'") && cleanMessage.endsWith("'"))
+    ) {
+      cleanMessage = cleanMessage.slice(1, -1).trim();
+    }
+
+    // Additional cleaning for any remaining quotes or formatting
+    cleanMessage = cleanMessage.replace(/^["']|["']$/g, "").trim();
+
+    // Final validation - if message is empty after cleaning, return null
+    if (!cleanMessage || cleanMessage.length === 0) {
+      console.log("Message is empty after cleaning");
+      return null;
+    }
+
+    // Validate word count (10-15 words, but allow 8-18 for flexibility)
+    const wordCount = cleanMessage
+      .split(/\s+/)
+      .filter((word) => word.length > 0).length;
+    if (wordCount < 5 || wordCount > 20) {
+      console.log(
+        `Message word count (${wordCount}) outside acceptable range, returning null`
+      );
+      return null;
+    }
+
+    console.log(
+      `Generated connection message (${wordCount} words):`,
+      cleanMessage
+    );
+    console.log(
+      `Profile data used - Name: ${firstName} ${lastName}, Job: ${
+        hasJobTitle ? jobTitle : "N/A"
+      }, About: ${hasAbout ? "Available" : "N/A"}`
+    );
+
+    return cleanMessage;
+  } catch (error) {
+    console.error("Error generating connection request message:", error);
+    return null;
+  }
+}
+
 // Main function to make activity API call
-async function makeActivityApiCall(topicEngData) {
+// Modified function to make activity API call with optional message
+async function makeActivityApiCall(
+  topicEngData,
+  engagementType = "visit",
+  message = null
+) {
   try {
     // Validate that we have the required data
     if (
@@ -319,94 +539,272 @@ async function makeActivityApiCall(topicEngData) {
       !topicEngData.topic_id ||
       !topicEngData.contact_id
     ) {
-      console.error("Missing required topic engagement data:", topicEngData);
-      return;
+      console.log("Missing required topic engagement data:", topicEngData);
+      throw new Error("Missing required topic engagement data");
+    }
+
+    const payload = {
+      activityId: topicEngData?.last_activity_id,
+      businessId: topicEngData.business_id,
+      engagement_type: engagementType,
+      segmentId: topicEngData.topic_id,
+      customerId: topicEngData.contact_id,
+      isAutoPost: true,
+    };
+
+    // Add message to payload if provided
+    if (message) {
+      payload.message = message;
     }
 
     await chrome.runtime.sendMessage({
       action: "MAKE_ACTIVITY_API_CALL",
-      payload: {
-        activityId: topicEngData?.last_activity_id,
-        businessId: topicEngData.business_id,
-        engagement_type: "visit",
-        segmentId: topicEngData.topic_id,
-        customerId: topicEngData.contact_id,
-
-        isAutoPost: autoPostEnabled,
-      },
+      payload: payload,
     });
 
-    console.log("Activity API call completed successfully");
+    console.log(
+      `Activity API call completed successfully with type: ${engagementType}${
+        message ? " with message" : ""
+      }`
+    );
+    return true;
   } catch (error) {
-    console.error("Error making activity API call:", error);
-    await setToChromeStorage("topic_eng_data", {});
-
-    chrome.runtime.sendMessage({
-      action: "DELAYED_FEED_REDIRECT",
-      minDelay,
-      maxDelay,
-      url: await getRandomTopicUrl(),
-    });
+    console.log("Error making activity API call:", error);
+    throw error;
   }
 }
 
 // Main function to update contact
 async function updateContactAction() {
   try {
-    const { firstName, lastName } = getFirstLastName();
-    const address = getAddress();
-    const jobTitle = getJobTitle();
-    const avatar = getAvatar();
-    const about = getAbout();
-    const education = getEducation();
-    const experience = getExperience();
-    const skills = getSkills();
+    // Helper function to safely get values
+    const safeGetValue = (fn, fieldName) => {
+      try {
+        const value = fn();
+        return value || "";
+      } catch (error) {
+        console.log(`Failed to get ${fieldName}:`, error);
+        return "";
+      }
+    };
 
-    // Create summary JSON object
-    const summary = JSON.stringify({
-      about: about,
-      education: education,
-      experience: experience,
-      skills: skills,
-    });
+    // Safely get all contact data
+    const { firstName, lastName } = safeGetValue(
+      getFirstLastName,
+      "firstName/lastName"
+    ) || { firstName: "", lastName: "" };
+    const address = safeGetValue(getAddress, "address");
+    const jobTitle = safeGetValue(getJobTitle, "jobTitle");
+    const avatar = safeGetValue(getAvatar, "avatar");
+    const about = safeGetValue(getAbout, "about");
+    const education = safeGetValue(getEducation, "education");
+    const experience = safeGetValue(getExperience, "experience");
+    const skills = safeGetValue(getSkills, "skills");
+
+    // Create summary JSON object (only include non-empty values)
+    const summaryData = {};
+    if (about) summaryData.about = about;
+    if (education) summaryData.education = education;
+    if (experience) summaryData.experience = experience;
+    if (skills) summaryData.skills = skills;
+
+    const summary = JSON.stringify(summaryData);
 
     const topicEngData = await getFromChromeStorage("topic_eng_data", {});
 
     // Validate that we have the required data
     if (!topicEngData.business_id || !topicEngData.contact_id) {
-      console.error("Missing required topic engagement data:", topicEngData);
-      return;
+      console.log("Missing required topic engagement data:", topicEngData);
+      throw new Error("Missing required topic engagement data");
     }
 
     const contactData = {
-      address: address || "",
-      jobTitle: jobTitle || "",
-      avatar: avatar || "",
+      address: address,
+      jobTitle: jobTitle,
+      avatar: avatar,
       contact_id: topicEngData.contact_id,
       business_id: topicEngData.business_id,
       summary: summary,
     };
+
+    // Log what data was successfully collected
+    console.log("Successfully collected data:", {
+      address: !!address,
+      jobTitle: !!jobTitle,
+      avatar: !!avatar,
+      about: !!about,
+      education: !!education,
+      experience: !!experience,
+      skills: !!skills,
+    });
+
     await chrome.runtime.sendMessage({
       action: "UPDATE_CONTACT_ACTION",
       data: contactData,
     });
 
     console.log("Contact update completed successfully", contactData);
+    return true;
   } catch (error) {
-    console.error("Error updating contact:", error);
-    await setToChromeStorage("topic_eng_data", {});
-
-    chrome.runtime.sendMessage({
-      action: "DELAYED_FEED_REDIRECT",
-      minDelay,
-      maxDelay,
-      url: await getRandomTopicUrl(),
-    });
+    console.log("Error updating contact:", error);
+    throw error;
   }
 }
 
-// Main initialization function
-// Main initialization function
+// Fetch profile API
+async function fetchProfileApi(vanityName, csrfToken) {
+  const secChUaHeader = await getSecChUaHeader();
+  const secChUaMobile = getSecChUaMobile();
+  const secChUaPlatform = getSecChUaPlatform();
+  const xLiLang = getXLiLang();
+  const acceptLanguage = getAcceptLanguage();
+  const xLiTrackHeader = getXLiTrackHeader();
+  try {
+    const response = await fetch(
+      `https://www.linkedin.com/voyager/api/graphql?includeWebMetadata=true&variables=(vanityName:${vanityName})&queryId=voyagerIdentityDashProfiles.ee32334d3bd69a1900a077b5451c646a`,
+      {
+        headers: {
+          accept: "application/vnd.linkedin.normalized+json+2.1",
+          "accept-language": acceptLanguage,
+          "csrf-token": csrfToken,
+          priority: "u=1, i",
+          "sec-ch-prefers-color-scheme": "dark",
+          "sec-ch-ua": secChUaHeader,
+          "sec-ch-ua-mobile": secChUaMobile,
+          "sec-ch-ua-platform": secChUaPlatform,
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-origin",
+          "x-li-lang": xLiLang,
+          "x-li-page-instance":
+            "urn:li:page:d_flagship3_profile_view_base;fILxOF9sQQaKwBGRmfSksA==",
+          "x-li-pem-metadata": "Voyager - Profile=profile-top-card-core",
+          "x-li-track": xLiTrackHeader,
+          "x-restli-protocol-version": "2.0.0",
+        },
+        referrer:
+          "https://www.linkedin.com/mynetwork/invite-connect/connections/",
+        referrerPolicy: "strict-origin-when-cross-origin",
+        body: null,
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Profile API failed with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Profile API response:", data);
+
+    // Extract member profile ID
+    const memberProfile =
+      data?.data?.data?.identityDashProfilesByMemberIdentity?.[
+        "*elements"
+      ]?.[0];
+    if (!memberProfile) {
+      throw new Error("Member profile not found in response");
+    }
+
+    return memberProfile;
+  } catch (error) {
+    console.log("Error fetching profile:", error);
+    throw error;
+  }
+}
+
+// Modified send connection request API with customMessage support
+async function sendConnectionRequest(
+  memberProfileId,
+  csrfToken,
+  customMessage = null
+) {
+  const secChUaHeader = await getSecChUaHeader();
+  const secChUaMobile = getSecChUaMobile();
+  const secChUaPlatform = getSecChUaPlatform();
+  const xLiLang = getXLiLang();
+  const acceptLanguage = getAcceptLanguage();
+  const xLiTrackHeader = getXLiTrackHeader();
+
+  try {
+    // Prepare the request body
+    const requestBody = {
+      invitee: {
+        inviteeUnion: {
+          memberProfile: memberProfileId,
+        },
+      },
+    };
+
+    // Only add customMessage if it's provided and not null
+    if (customMessage) {
+      requestBody.customMessage = customMessage;
+    } else {
+      requestBody.customMessage = "";
+    }
+
+    const response = await fetch(
+      "https://www.linkedin.com/voyager/api/voyagerRelationshipsDashMemberRelationships?action=verifyQuotaAndCreateV2&decorationId=com.linkedin.voyager.dash.deco.relationships.InvitationCreationResultWithInvitee-2",
+      {
+        headers: {
+          accept: "application/vnd.linkedin.normalized+json+2.1",
+          "accept-language": acceptLanguage,
+          "content-type": "application/json; charset=UTF-8",
+          "csrf-token": csrfToken,
+          priority: "u=1, i",
+          "sec-ch-prefers-color-scheme": "dark",
+          "sec-ch-ua": secChUaHeader,
+          "sec-ch-ua-mobile": secChUaMobile,
+          "sec-ch-ua-platform": secChUaPlatform,
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-origin",
+          "x-li-deco-include-micro-schema": "true",
+          "x-li-lang": xLiLang,
+          "x-li-page-instance":
+            "urn:li:page:d_flagship3_profile_view_base;RSd+9vLrTzqqZhSpO+AWDA==",
+          "x-li-pem-metadata":
+            "Voyager - Profile Actions=topcard-overflow-connect-action-click,Voyager - Invitations - Actions=invite-send",
+          "x-li-track": xLiTrackHeader,
+          "x-restli-protocol-version": "2.0.0",
+        },
+        body: JSON.stringify(requestBody),
+        method: "POST",
+        mode: "cors",
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Connection request failed with status: ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+    console.log("Connection request sent successfully:", data);
+    return true;
+  } catch (error) {
+    console.log("Error sending connection request:", error);
+    throw error;
+  }
+}
+
+// Handle redirect after error or completion
+async function handleRedirect() {
+  await setToChromeStorage("topic_eng_data", {});
+
+  chrome.runtime.sendMessage({
+    action: "DELAYED_FEED_REDIRECT",
+    minDelay,
+    maxDelay,
+    url: await getRandomTopicUrl(),
+  });
+}
+
+// Main initialization function with GPT connection request integration
 async function initializeProfile() {
   try {
     console.log("Profile.js initializing...");
@@ -421,6 +819,11 @@ async function initializeProfile() {
       });
     });
 
+    // Initialize userPrompt from storage if available
+    if (topicEngData.userPrompt) {
+      userPrompt = topicEngData.userPrompt;
+    }
+
     // Get current page URL
     const currentPageUrl = getCurrentProfileUrl();
 
@@ -429,6 +832,13 @@ async function initializeProfile() {
       "Poster profile URL from storage:",
       topicEngData.posterProfileUrl
     );
+
+    // NEW: Check if current URL contains /in/ - if not, handle redirect
+    if (!currentPageUrl.includes("/in/")) {
+      console.log("Current URL does not contain '/in/' - handling redirect");
+      await handleRedirect();
+      return;
+    }
 
     // Only proceed if the current page URL matches the poster profile URL
     const normalizedPosterUrl = topicEngData.posterProfileUrl.replace(
@@ -440,13 +850,180 @@ async function initializeProfile() {
     if (normalizedPosterUrl === normalizedCurrentUrl) {
       console.log("URLs match - proceeding with profile engagement");
 
-      // 1. Make activity API call with type "visit"
-      await makeActivityApiCall(topicEngData);
+      // Step 1: Make activity API call with type "visit" (regardless of success/failure, continue)
+      try {
+        await makeActivityApiCall(topicEngData, "visit");
+      } catch (error) {
+        console.log("Visit activity API call failed, but continuing:", error);
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // 2. Update contact action with scraped data
-      await updateContactAction();
+      // Step 2: Update contact action (regardless of success/failure, continue)
+      try {
+        await updateContactAction();
+      } catch (error) {
+        console.log("Update contact action failed, but continuing:", error);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Step 3: Fetch profile and send connection request
+      try {
+        // Get vanity name from current URL
+        const vanityName = getVanityName(currentPageUrl);
+        if (!vanityName) {
+          throw new Error("Could not extract vanity name from URL");
+        }
+
+        // Get CSRF token
+        const csrfToken = await getCsrfToken();
+        if (!csrfToken) {
+          throw new Error("Could not get CSRF token");
+        }
+
+        // Fetch profile
+        const memberProfile = await fetchProfileApi(vanityName, csrfToken);
+        console.log("Profile fetch completed successfully");
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Step 4: Generate GPT connection request message after successful profile fetch
+        let customMessage = null;
+        try {
+          console.log("Generating GPT connection request message...");
+          const generatedMessage = await generateConnectionRequestMessage();
+
+          if (
+            generatedMessage &&
+            !generatedMessage.toLowerCase().includes("null")
+          ) {
+            // Clean the message - remove Note: section and reference: section
+            let cleanedMessage = generatedMessage;
+
+            // Remove "Note:" section and everything after it
+            if (cleanedMessage.toLowerCase().includes("note:")) {
+              cleanedMessage = cleanedMessage.split(/note:/i)[0].trim();
+            }
+
+            // Remove "reference:" section and everything after it
+            if (cleanedMessage.toLowerCase().includes("reference:")) {
+              cleanedMessage = cleanedMessage.split(/reference:/i)[0].trim();
+            }
+
+            // Remove any trailing punctuation or extra whitespace
+            cleanedMessage = cleanedMessage.replace(/\s+/g, " ").trim();
+
+            // Final validation - ensure we still have a meaningful message
+            if (cleanedMessage && cleanedMessage.length > 5) {
+              customMessage = cleanedMessage;
+              console.log(
+                "GPT connection request message generated and cleaned successfully:",
+                customMessage
+              );
+            } else {
+              console.log(
+                "GPT connection request generation resulted in empty message after cleaning"
+              );
+            }
+          } else {
+            console.log(
+              "GPT connection request generation failed or returned NULL"
+            );
+          }
+        } catch (error) {
+          console.log(
+            "Error generating GPT connection request message:",
+            error
+          );
+        }
+
+        // Step 5: Send connection request with retry logic
+        let connectionSuccess = false;
+        let sentWithMessage = false; // Track if connection was sent with custom message
+
+        // First attempt with custom message (if available)
+        if (customMessage) {
+          try {
+            console.log("Sending connection request with custom message...");
+            await sendConnectionRequest(
+              memberProfile,
+              csrfToken,
+              customMessage
+            );
+            connectionSuccess = true;
+            sentWithMessage = true; // Mark as sent with message
+            console.log(
+              "Connection request with custom message sent successfully"
+            );
+          } catch (error) {
+            console.log(
+              "Connection request with custom message failed:",
+              error
+            );
+
+            // Retry without custom message
+            try {
+              console.log(
+                "Retrying connection request without custom message..."
+              );
+              await sendConnectionRequest(memberProfile, csrfToken);
+              connectionSuccess = true;
+              sentWithMessage = false; // Mark as sent without message
+              console.log(
+                "Connection request without custom message sent successfully"
+              );
+            } catch (retryError) {
+              console.log("Connection request retry also failed:", retryError);
+            }
+          }
+        } else {
+          // Send without custom message
+          try {
+            console.log("Sending connection request without custom message...");
+            await sendConnectionRequest(memberProfile, csrfToken);
+            connectionSuccess = true;
+            sentWithMessage = false; // Mark as sent without message
+            console.log("Connection request sent successfully");
+          } catch (error) {
+            console.log("Connection request failed:", error);
+          }
+        }
+
+        // If connection request failed completely, handle redirect
+        if (!connectionSuccess) {
+          console.log("All connection request attempts failed");
+          await handleRedirect();
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Step 6: Make activity API call with type "connectionsent" (only if connection was successful)
+        try {
+          if (sentWithMessage && customMessage) {
+            // Pass the message if connection was sent with custom message
+            await makeActivityApiCall(
+              topicEngData,
+              "connectionsent",
+              customMessage
+            );
+            console.log("Activity API call made with custom message");
+          } else {
+            // Don't pass message if connection was sent without custom message
+            await makeActivityApiCall(topicEngData, "connectionsent");
+            console.log("Activity API call made without message");
+          }
+        } catch (error) {
+          console.log("Connection sent activity API call failed:", error);
+          await handleRedirect();
+          return;
+        }
+      } catch (error) {
+        console.log("Error in profile fetch or connection request:", error);
+        await handleRedirect();
+        return;
+      }
 
       // Clear the topic_eng_data object from Chrome storage
       await setToChromeStorage("topic_eng_data", {});
@@ -468,14 +1045,7 @@ async function initializeProfile() {
     }
   } catch (error) {
     console.error("Error during profile initialization:", error);
-    await setToChromeStorage("topic_eng_data", {});
-
-    chrome.runtime.sendMessage({
-      action: "DELAYED_FEED_REDIRECT",
-      minDelay,
-      maxDelay,
-      url: await getRandomTopicUrl(),
-    });
+    await handleRedirect();
   }
 }
 

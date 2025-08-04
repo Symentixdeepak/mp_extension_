@@ -90,6 +90,9 @@
         <button class="tab-button px-6 py-3 font-medium" data-tab="history">
           Engagement Feed History
         </button>
+        <button class="tab-button px-6 py-3 font-medium" data-tab="topic">
+          Topic List
+        </button>
         <!-- NEW TAB -->
       </div>
 
@@ -197,7 +200,7 @@
                 LinkedIn feed.
               </p>
             </div>
-                        <div class="mb-4">
+            <div class="mb-4">
               <label class="flex items-center space-x-3 mb-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -209,8 +212,8 @@
                 >
               </label>
               <p class="text-sm text-gray-600 ml-8">
-                When enabled, the extension will engage with posts on your
-                Topic list.
+                When enabled, the extension will engage with posts on your Topic
+                list.
               </p>
             </div>
 
@@ -851,6 +854,52 @@
         </div>
       </div>
 
+      <!-- //topic list tab content -->
+      <div
+        id="topic"
+        class="tab-content bg-white rounded-b-lg shadow-md p-6 hidden"
+      >
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+          "
+        >
+          <h2 class="text-xl font-semibold mb-4" id="topic-list-title">
+            Topic List
+          </h2>
+
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 10px;
+              margin-bottom: 10px;
+    
+            "
+          >
+            <label
+              for="topicTabBoardSelect"
+              class="block text-sm font-medium text-gray-700 mb-1"
+            >
+              Select Workspace:
+            </label>
+            <select
+            style="width: 200px;"
+              id="topicTabBoardSelect"
+              class="form-select rounded border border-gray-300 text-sm p-1 w-full"
+            >
+              <option value="">Select workspace</option>
+              <!-- Populate options dynamically as needed -->
+            </select>
+            <div  id="topic-list-controls"></div>
+          </div>
+        </div>
+        <div id="topic-list-content">
+          <!-- Topic list will be rendered here by TopicListManager -->
+        </div>
+      </div>
       <div class="mt-8 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
         <div class="flex">
           <div class="flex-shrink-0">

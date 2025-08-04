@@ -65,7 +65,9 @@ class EngagementTracker {
     const { engagementHistory = [] } = await chrome.storage.local.get(
       "engagementHistory"
     );
-    return engagementHistory.find((p) => p.postId === postId);
+    const post = engagementHistory.find((p) => p.postId === postId);
+    console.log("getPostById", postId, post);
+    return !!post; // Return true if post with postId exists, false otherwise
   }
 }
 

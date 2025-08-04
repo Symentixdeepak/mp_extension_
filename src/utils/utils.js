@@ -577,10 +577,80 @@ async function updateLocalStorageObject(key, updates) {
   return await setToChromeStorage(key, updated);
 }
 
+function getXLiTrackHeader() {
+  const clientVersion = "1.13.22412";
+  const mpVersion = "1.13.22412";
+  const osName = "web";
+  const timezoneOffset = new Date().getTimezoneOffset() / -60;
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const deviceFormFactor = window.innerWidth <= 768 ? "MOBILE" : "DESKTOP";
+  const mpName = "voyager-web";
+  const displayDensity = window.devicePixelRatio || 1;
+  const displayWidth = window.screen.width;
+  const displayHeight = window.screen.height;
+
+  return JSON.stringify({
+    clientVersion,
+    mpVersion,
+    osName,
+    timezoneOffset,
+    timezone,
+    deviceFormFactor,
+    mpName,
+    displayDensity,
+    displayWidth,
+    displayHeight,
+  });
+}
+
+function getAcceptLanguage() {
+  const languages = navigator.languages || [
+    navigator.language || navigator.userLanguage || "en-US",
+  ];
+  return languages
+    .map((lang, index) => `${lang};q=${(1 - index * 0.1).toFixed(1)}`)
+    .join(", ");
+}
+
+function getSecChUaMobile() {
+  return window.innerWidth <= 768 ? "?1" : "?0";
+}
+
+function getSecChUaPlatform() {
+  return `"${navigator.platform}"`;
+}
+
+function getXLiLang() {
+  const language = navigator.language || navigator.userLanguage || "en-US";
+  return language.replace("-", "_");
+}
+async function getSecChUaHeader() {
+  if (navigator.userAgentData) {
+    const brands = await navigator.userAgentData.getHighEntropyValues([
+      "brands",
+    ]);
+    const secChUa = brands.brands
+      .map((brand) => `"${brand.brand}";v="${brand.version}"`)
+      .join(", ");
+    return secChUa;
+  } else {
+    // Fallback for older browsers that do not support navigator.userAgentData
+    const ua = navigator.userAgent;
+    const isChromium = ua.includes("Chrome") || ua.includes("Chromium");
+    const chromeVersionMatch =
+      ua.match(/Chrome\/(\d+)/) || ua.match(/Chromium\/(\d+)/);
+    const chromeVersion = chromeVersionMatch
+      ? chromeVersionMatch[1]
+      : "Unknown";
+
+    return `"Chromium";v="${chromeVersion}", "Not;A=Brand";v="24", "Google Chrome";v="${chromeVersion}"`;
+  }
+}
 module.exports = {
   getPostId,
   getPostUrl,
   getPosterProfile,
+  getSecChUaHeader,
   getFirstUgcId,
   populateBoards,
   getPosterName,
@@ -588,7 +658,8 @@ module.exports = {
   truncateWords,
   getRandomDelay,
   setImportButtonState,
-  extractFirstAndLastName,getFromChromeStorage,
+  extractFirstAndLastName,
+  getFromChromeStorage,
   updateLocalStorageObject,
   setToChromeStorage,
   extractAvatarUrl,
@@ -604,7 +675,11 @@ module.exports = {
   populateListType,
   fetchBoards,
   getRandomTopicUrl,
-
+  getXLiTrackHeader,
+  getAcceptLanguage,
+  getSecChUaMobile,
+  getSecChUaPlatform,
+  getXLiLang,
   fetchTopicList,
 };
 
@@ -612,6 +687,7 @@ module.exports = {
 const { APIURL } = require("./constant");
 
 // Add topic to list API
+
 
 // Fetch topic list API
 async function fetchTopicList(sessionId) {
@@ -622,12 +698,11 @@ async function fetchTopicList(sessionId) {
     const response = await fetch(
       `${APIURL}/linkedin-topic/list?lkdn_profile_id=${encodeURIComponent(
         sessionId
-      )}&rows_per_page=50&page_no=1&order_by=asc`,
+      )}&rows_per_page=70&page_no=1&order_by=asc`,
       {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
-          "b-id": boards[0]?.business_id,
         },
       }
     );
@@ -653,10 +728,7 @@ async function getLinkedInSessionId() {
         return reject("user_info not found");
       }
       // Only log once:
-      if (!window.__mp_logged_id) {
-        console.log("LinkedIn ID:", userInfo);
-        window.__mp_logged_id = true;
-      }
+
       resolve(userInfo);
     });
   });
@@ -687,6 +759,8 @@ async function getRandomTopicUrl() {
     chrome.runtime.sendMessage(
       { action: "getTopicList", sessionId },
       (response) => {
+        console.log("Received response:", response); // Add this too
+
         if (chrome.runtime.lastError) {
           console.error("Error getting topic list:", chrome.runtime.lastError);
           resolve(null);
