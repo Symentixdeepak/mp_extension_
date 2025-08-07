@@ -727,9 +727,17 @@ if (!window.historyManagerInitialized) {
                     </button>
                   </div>
                 </div>
-                <p class="text-sm text-gray-700 mt-1" style="white-space: pre-wrap;">Prompt: ${
-                  topic.prompt || "No description"
-                }</p>
+      <p class="text-sm text-gray-700 mt-1" >
+  <span style="font-weight: bold; color: black;">Engagement Prompt:</span> ${
+    topic.prompt || "No description"
+  }
+</p>
+<p class="text-sm text-gray-700 mt-1" >
+  <span style="font-weight: bold; color: black;">Business Goal:</span> ${
+    topic.goal_prompt || "No goal prompt"
+  }
+</p>
+
               </div>
             `
           )

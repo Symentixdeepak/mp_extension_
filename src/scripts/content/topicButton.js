@@ -39,13 +39,15 @@ async function waitForPageReady(maxRetries = 15, retryDelay = 1000) {
     }
 
     // Check for LinkedIn's app container and search elements
-    const appContainer = document.querySelector('#global-nav') || 
-                        document.querySelector('.application-outlet') ||
-                        document.querySelector('main');
-    
-    const searchContainer = document.querySelector('.search-results-container') ||
-                           document.querySelector('[data-view-name="search-results"]') ||
-                           document.querySelector('.search-results');
+    const appContainer =
+      document.querySelector("#global-nav") ||
+      document.querySelector(".application-outlet") ||
+      document.querySelector("main");
+
+    const searchContainer =
+      document.querySelector(".search-results-container") ||
+      document.querySelector('[data-view-name="search-results"]') ||
+      document.querySelector(".search-results");
 
     if (appContainer && searchContainer) {
       console.log(`Page ready on attempt ${i + 1}`);
@@ -186,21 +188,27 @@ async function waitForFiltersBar(maxRetries = 20, retryDelay = 500) {
       "#search-reusables__filters-bar",
       ".search-reusables__filter-list",
       ".search-results-container .artdeco-pill-choice-group",
-      "[data-view-name='search-results'] .artdeco-pill-choice-group"
+      "[data-view-name='search-results'] .artdeco-pill-choice-group",
     ];
 
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       if (element) {
         // For the filters bar, we want the ul element specifically
-        if (selector.includes('ul')) {
-          console.log(`Filters bar UL found on attempt ${i + 1} with selector: ${selector}`);
+        if (selector.includes("ul")) {
+          console.log(
+            `Filters bar UL found on attempt ${
+              i + 1
+            } with selector: ${selector}`
+          );
           return element;
         } else {
           // If we found the container, look for ul inside
-          const ul = element.querySelector('ul') || element;
+          const ul = element.querySelector("ul") || element;
           if (ul) {
-            console.log(`Filters bar found on attempt ${i + 1} with selector: ${selector}`);
+            console.log(
+              `Filters bar found on attempt ${i + 1} with selector: ${selector}`
+            );
             return ul;
           }
         }
@@ -220,6 +228,143 @@ async function waitForFiltersBar(maxRetries = 20, retryDelay = 500) {
 async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
   let popoverEl = document.querySelector(".mp-topic-popover");
   if (popoverEl) popoverEl.remove();
+
+  const hasToken = await checkAuthToken();
+  if (!hasToken) {
+    console.log("No auth token found, showing login UI");
+
+    // Create login popover
+    popoverEl = document.createElement("div");
+    popoverEl.className = "mp-topic-popover";
+    Object.assign(popoverEl.style, {
+      position: "absolute",
+      zIndex: 9999,
+      background: "#fff",
+      border: "1px solid #ccc",
+      borderRadius: "8px",
+      boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
+      padding: "0px",
+      minWidth: "350px",
+      maxWidth: "450px",
+    });
+
+    // Create login UI
+    const loginContainer = document.createElement("div");
+    loginContainer.className = "flex flex-col items-center justify-center py-0";
+
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "bg-white p-4 max-w-md w-full text-center";
+    Object.assign(contentDiv.style, {
+      padding: "12px", // Increased padding
+    });
+
+    // Logo
+    const logo = document.createElement("img");
+    logo.src = "https://app.manageplus.io/admin/images/mp_logo_transparent.png";
+    logo.alt = "ManagePlus Logo";
+    logo.className = "mx-auto mb-0";
+    Object.assign(logo.style, {
+      width: "70px", // Slightly bigger logo
+      height: "70px",
+      display: "block",
+      margin: "0 auto 16px auto", // More margin bottom
+    });
+
+    // Title
+    const title = document.createElement("h3");
+    title.textContent = "Login Required";
+    Object.assign(title.style, {
+      fontSize: "22px", // Bigger font
+      fontWeight: "bold",
+      color: "#111827",
+      textAlign: "center",
+      margin: "0 0 10px 0", // More spacing
+      lineHeight: "1.2",
+    });
+
+    // Description
+    const description = document.createElement("p");
+    description.textContent =
+      "To add topic you need to login to your ManagePlus account";
+    Object.assign(description.style, {
+      fontSize: "14px", // Bigger font
+      color: "#6B7280",
+      textAlign: "center",
+      marginBottom: "14px", // More spacing
+      lineHeight: "1.5",
+      padding: "0 8px", // Side padding for better text flow
+    });
+
+    // Login button
+    const loginContainerButton = document.createElement("div");
+    loginContainerButton.style.display = "flex";
+    loginContainerButton.style.justifyContent = "center";
+    loginContainerButton.style.alignItems = "center";
+    loginContainerButton.style.width = "100%";
+
+    const loginBtn = document.createElement("button");
+    // const loginBtn = document.createElement("button");
+    loginBtn.id = "mp-login-btn";
+    loginBtn.textContent = "Login to ManagePlus";
+    Object.assign(loginBtn.style, {
+      padding: "10px 12px", // More padding
+      background: "#101112",
+      color: "#fff",
+      border: "none",
+      boxShadow: "none",
+      borderRadius: "8px", // Slightly more rounded
+      fontWeight: "600",
+      fontSize: "14px", // Bigger font
+      outline: "none",
+      transition: "background 0.2s",
+      cursor: "pointer",
+      width: "50%",
+    });
+
+    // Add hover effect
+    loginBtn.addEventListener("mouseenter", () => {
+      loginBtn.style.background = "#1f2937";
+    });
+    loginBtn.addEventListener("mouseleave", () => {
+      loginBtn.style.background = "#101112";
+    });
+
+    // Login button click handler
+    loginBtn.onclick = () => {
+      // Open login page in new tab
+      window.open("https://app.manageplus.io/", "_blank");
+      popoverEl.remove();
+    };
+
+    // Append elements
+    loginContainerButton.appendChild(loginBtn); // First append button to container
+
+    contentDiv.appendChild(logo);
+    contentDiv.appendChild(title);
+    contentDiv.appendChild(description);
+    contentDiv.appendChild(loginContainerButton); // Then append the container
+    loginContainer.appendChild(contentDiv);
+    popoverEl.appendChild(loginContainer);
+    document.body.appendChild(popoverEl);
+
+    // Position popover below the button
+    const rect = buttonEl.getBoundingClientRect();
+    popoverEl.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    popoverEl.style.left = `${rect.left + window.scrollX}px`;
+
+    // Close popover on outside click
+    setTimeout(() => {
+      function onClickOutside(e) {
+        if (popoverEl && !popoverEl.contains(e.target)) {
+          popoverEl.remove();
+          document.removeEventListener("mousedown", onClickOutside);
+        }
+      }
+      document.addEventListener("mousedown", onClickOutside);
+    }, 0);
+
+    return;
+  }
 
   const workspaceList = await fetchWorkspaces();
   const { DEFAULT_SETTINGS } = require("../../utils/constant");
@@ -450,11 +595,11 @@ function cleanupTopicButton() {
   const selectors = [
     "#search-reusables__filters-bar ul li.mp-topic-button-li",
     ".search-reusables__filter-list li.mp-topic-button-li",
-    ".mp-topic-button-li"
+    ".mp-topic-button-li",
   ];
-  
-  selectors.forEach(selector => {
-    document.querySelectorAll(selector).forEach(li => li.remove());
+
+  selectors.forEach((selector) => {
+    document.querySelectorAll(selector).forEach((li) => li.remove());
   });
 }
 
@@ -467,8 +612,7 @@ function shouldUpdateButton(newState) {
 
   return (
     currentButtonState.isManaged !== newState.isManaged ||
-    currentButtonState.url !== newState.url ||
-    currentButtonState.hasToken !== newState.hasToken
+    currentButtonState.url !== newState.url
   );
 }
 
@@ -478,19 +622,11 @@ async function renderTopicButton({ isManaged, onAdd, onManage }) {
     const ul = await waitForFiltersBar();
 
     // Check if user has auth token first
-    const hasToken = await checkAuthToken();
-    if (!hasToken) {
-      console.log("No auth token found, skipping button render");
-      cleanupTopicButton();
-      currentButtonState = null;
-      return;
-    }
 
     // Check if we need to update the button
     const newState = {
       isManaged,
       url: window.location.href,
-      hasToken,
     };
 
     if (!shouldUpdateButton(newState)) {
@@ -538,7 +674,7 @@ async function renderTopicButton({ isManaged, onAdd, onManage }) {
       button.style.backgroundColor = "#333333";
       button.style.transform = "translateY(-1px)";
     });
-    
+
     button.addEventListener("mouseleave", () => {
       button.style.backgroundColor = "#000000";
       button.style.transform = "translateY(0)";
@@ -787,7 +923,7 @@ function debounceRenderButton() {
 async function renderButtonIfNeeded() {
   const currentUrl = window.location.href;
   const pathname = window.location.pathname;
-  
+
   console.log("=== renderButtonIfNeeded called ===");
   console.log("Current URL:", currentUrl);
   console.log("Pathname:", pathname);
@@ -876,22 +1012,25 @@ function patchHistoryMethods() {
 function onNavigationChange() {
   const newUrl = window.location.href;
   const pathname = window.location.pathname;
-  
+
   console.log("=== Navigation Change Detected ===");
   console.log("New URL:", newUrl);
   console.log("Pathname:", pathname);
-  console.log("Is content search page:", /^\/search\/results\/content(\/|$)/.test(pathname));
-  
+  console.log(
+    "Is content search page:",
+    /^\/search\/results\/content(\/|$)/.test(pathname)
+  );
+
   // Always reset state on navigation
   currentButtonState = null;
   lastURL = newUrl;
-  
+
   // Clear any existing render timeout
   if (renderTimeout) {
     clearTimeout(renderTimeout);
     renderTimeout = null;
   }
-  
+
   // Trigger button render/cleanup
   debounceRenderButton();
 }
@@ -932,29 +1071,35 @@ const observer = new MutationObserver((mutations) => {
   // Look for key LinkedIn SPA navigation indicators
   const hasNavigationChanges = mutations.some((mutation) => {
     // Check for main content area changes
-    if (mutation.target.classList?.contains('scaffold-layout__main') ||
-        mutation.target.classList?.contains('application-outlet') ||
-        mutation.target.id === 'main') {
+    if (
+      mutation.target.classList?.contains("scaffold-layout__main") ||
+      mutation.target.classList?.contains("application-outlet") ||
+      mutation.target.id === "main"
+    ) {
       return true;
     }
 
     // Check for search results container changes
-    if (mutation.target.classList?.contains('search-results-container') ||
-        mutation.target.querySelector('.search-results-container')) {
+    if (
+      mutation.target.classList?.contains("search-results-container") ||
+      mutation.target.querySelector(".search-results-container")
+    ) {
       return true;
     }
 
     // Check for filters bar or search navigation changes
-    if (mutation.target.id === "search-reusables__filters-bar" ||
-        mutation.target.closest("#search-reusables__filters-bar") ||
-        mutation.target.classList?.contains('search-reusables__side-panel') ||
-        Array.from(mutation.addedNodes).some(
-          (node) =>
-            node.nodeType === Node.ELEMENT_NODE &&
-            (node.id === "search-reusables__filters-bar" ||
-              node.querySelector("#search-reusables__filters-bar") ||
-              node.classList?.contains('search-results-container'))
-        )) {
+    if (
+      mutation.target.id === "search-reusables__filters-bar" ||
+      mutation.target.closest("#search-reusables__filters-bar") ||
+      mutation.target.classList?.contains("search-reusables__side-panel") ||
+      Array.from(mutation.addedNodes).some(
+        (node) =>
+          node.nodeType === Node.ELEMENT_NODE &&
+          (node.id === "search-reusables__filters-bar" ||
+            node.querySelector("#search-reusables__filters-bar") ||
+            node.classList?.contains("search-results-container"))
+      )
+    ) {
       return true;
     }
 
@@ -984,7 +1129,7 @@ async function initializeScript() {
   console.log(`Attempt: ${initializationAttempts + 1}`);
   console.log(`Current URL: ${window.location.href}`);
   console.log(`Pathname: ${window.location.pathname}`);
-  
+
   try {
     // Always initialize the navigation detection regardless of current page
     console.log("Setting up navigation detection...");
@@ -994,15 +1139,17 @@ async function initializeScript() {
 
     // Check if we're currently on a content search page
     const pathname = window.location.pathname;
-    const isContentSearchPage = /^\/search\/results\/content(\/|$)/.test(pathname);
-    
+    const isContentSearchPage = /^\/search\/results\/content(\/|$)/.test(
+      pathname
+    );
+
     console.log("Is content search page:", isContentSearchPage);
-    
+
     if (isContentSearchPage) {
       console.log("On content search page, waiting for page ready...");
       try {
         const pageReady = await waitForPageReady(10, 1000); // Reduced retries, increased delay
-        
+
         if (pageReady) {
           console.log("Page ready, triggering initial render...");
           setTimeout(() => {
@@ -1021,14 +1168,16 @@ async function initializeScript() {
         }, 1500);
       }
     } else {
-      console.log("Not on content search page, navigation detection is active for future navigations");
+      console.log(
+        "Not on content search page, navigation detection is active for future navigations"
+      );
     }
 
     console.log("✅ Topic button script initialized successfully");
   } catch (error) {
     console.error("❌ Error during initialization:", error);
     initializationAttempts++;
-    
+
     if (initializationAttempts < MAX_INIT_ATTEMPTS) {
       setTimeout(() => {
         initializeScript();
@@ -1043,9 +1192,9 @@ console.log("Document ready state:", document.readyState);
 console.log("Current URL:", window.location.href);
 
 // Initialize immediately if DOM is ready, otherwise wait
-if (document.readyState === 'loading') {
+if (document.readyState === "loading") {
   console.log("DOM still loading, waiting for DOMContentLoaded...");
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener("DOMContentLoaded", () => {
     console.log("DOMContentLoaded fired");
     initializeScript();
   });
@@ -1055,7 +1204,7 @@ if (document.readyState === 'loading') {
 }
 
 // Additional fallback for LinkedIn's SPA navigation
-window.addEventListener('load', () => {
+window.addEventListener("load", () => {
   console.log("Window load event fired");
   if (!isInitialized) {
     console.log("Script not yet initialized, triggering from window load");
@@ -1064,9 +1213,10 @@ window.addEventListener('load', () => {
 });
 
 // Global navigation listener for LinkedIn clicks with better targeting
-document.addEventListener('click', (e) => {
+document.addEventListener("click", (e) => {
   // More specific LinkedIn navigation detection
-  const target = e.target.closest(`
+  const target = e.target.closest(
+    `
     a[href*="/search/results"],
     .search-reusables__filter-pill,
     .artdeco-pill,
@@ -1074,14 +1224,18 @@ document.addEventListener('click', (e) => {
     [data-control-name*="search"],
     .artdeco-tab,
     .search-navigation-panel__button
-  `.replace(/\s+/g, '').split(',').join(','));
-  
+  `
+      .replace(/\s+/g, "")
+      .split(",")
+      .join(",")
+  );
+
   if (target) {
-    const href = target.href || target.getAttribute('href');
+    const href = target.href || target.getAttribute("href");
     console.log("🔗 LinkedIn navigation click detected");
     console.log("Target element:", target.tagName, target.className);
     console.log("Href:", href);
-    
+
     // Multiple delayed checks to catch the navigation
     setTimeout(() => checkForNavigation("immediate"), 200);
     setTimeout(() => checkForNavigation("delayed"), 800);
@@ -1092,9 +1246,9 @@ document.addEventListener('click', (e) => {
 function checkForNavigation(checkType) {
   const newUrl = window.location.href;
   const pathname = window.location.pathname;
-  
+
   console.log(`🔍 Navigation check (${checkType}):`, newUrl);
-  
+
   if (newUrl !== lastURL) {
     console.log(`✅ URL changed detected via ${checkType} check`);
     console.log("Old URL:", lastURL);
@@ -1102,7 +1256,6 @@ function checkForNavigation(checkType) {
     onNavigationChange();
   }
 }
-
 
 (async function () {
   let hasChecked = false;
@@ -1112,39 +1265,41 @@ function checkForNavigation(checkType) {
     // Quick win: URL extraction
     const urlMatch = window.location.href.match(/\/in\/([^\/\?#]+)/);
     if (urlMatch) return urlMatch[1];
-    
+
     // Search code tags with profile data
-    const codeTags = document.querySelectorAll('code');
-    
+    const codeTags = document.querySelectorAll("code");
+
     for (let codeTag of codeTags) {
       const content = codeTag.textContent;
-      
+
       // Skip empty or small content
       if (!content || content.length < 50) continue;
-      
+
       // Look for LinkedIn profile indicators
-      if (content.includes('publicIdentifier') && 
-          (content.includes('MiniProfile') || content.includes('fs_miniProfile'))) {
-        
+      if (
+        content.includes("publicIdentifier") &&
+        (content.includes("MiniProfile") || content.includes("fs_miniProfile"))
+      ) {
         try {
           const data = JSON.parse(content);
-          
+
           // Method A: Check included array
           if (data.included && Array.isArray(data.included)) {
             for (let item of data.included) {
-              if (item.publicIdentifier && 
-                  item.$type && 
-                  item.$type.includes('MiniProfile')) {
+              if (
+                item.publicIdentifier &&
+                item.$type &&
+                item.$type.includes("MiniProfile")
+              ) {
                 return item.publicIdentifier;
               }
             }
           }
-          
+
           // Method B: Direct property check
           if (data.publicIdentifier) {
             return data.publicIdentifier;
           }
-          
         } catch (parseError) {
           // Fallback: regex extraction
           const match = content.match(/"publicIdentifier":\s*"([^"]+)"/);
@@ -1152,7 +1307,7 @@ function checkForNavigation(checkType) {
         }
       }
     }
-    
+
     return null;
   }
 

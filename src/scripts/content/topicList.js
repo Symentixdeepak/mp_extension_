@@ -1362,9 +1362,9 @@ async function engageWithFirstScannedPost() {
       if (!newPosts.length) {
         console.log("No new posts found after filtering duplicates");
         // If no new posts, try increasing the start parameter more aggressively
-        apiPageStart += 3; // Skip further ahead
+        apiPageStart += 1; // Skip further ahead
 
-        if (apiPageStart >= MAX_API_PAGES * 3) {
+        if (apiPageStart >= MAX_API_PAGES) {
           console.log("Exhausted pagination attempts, redirecting");
           isApiPaginating = false;
           processedPostIds.clear();
@@ -1387,7 +1387,9 @@ async function engageWithFirstScannedPost() {
       for (const post of newPosts) {
         // Add to processed set immediately to prevent reprocessing
         processedPostIds.add(post.postId);
-
+        await new Promise(
+          (resolve) => setTimeout(resolve, getRandomDelay(5000, 7000)) // Shorter delay for pagination
+        );
         console.log(`Processing new post ${post.postId}`);
         const postUrn = "urn:li:activity:" + post.postId;
         const engaged = await checkIfPostEngaged(postUrn);
@@ -1399,7 +1401,9 @@ async function engageWithFirstScannedPost() {
           console.log(`Post ${post.postId} already engaged, skipping.`);
           continue; // This post is processed (already engaged)
         }
-
+        await new Promise(
+          (resolve) => setTimeout(resolve, getRandomDelay(5000, 7000)) // Shorter delay for pagination
+        );
         // Post is not engaged, check relevance
         console.log(`Checking relevance for post ${post.postId}`);
         const relevanceResult = await checkPostRelevanceAPIpost(post.content);
@@ -1447,13 +1451,13 @@ async function engageWithFirstScannedPost() {
 
       // Only increment page start if ALL posts were processed (engaged or not relevant)
       if (allPostsProcessed) {
-        apiPageStart += 3; // Increment by 3 for next batch of posts
+        apiPageStart += 1; // Increment by 3 for next batch of posts
         console.log(
           `All posts on page processed. Moving to next page start: ${apiPageStart}`
         );
 
         // Check if we've reached the maximum page limit
-        if (apiPageStart >= MAX_API_PAGES * 3) {
+        if (apiPageStart >= MAX_API_PAGES) {
           console.log(
             `Reached maximum page limit. Redirecting to random topic.`
           );
@@ -1484,7 +1488,7 @@ async function engageWithFirstScannedPost() {
 
         console.log("About to wait before recursive call...");
         await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(15000, 22000)) // Shorter delay for pagination
+          (resolve) => setTimeout(resolve, getRandomDelay(20000, 30000)) // Shorter delay for pagination
         );
 
         console.log(
