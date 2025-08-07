@@ -23,7 +23,7 @@ const {
   MaxTokens,
   APIURL,
   defaultStartPrompt,
-  defaultEndPrompt,
+
   topicSystemPrompt,
 } = require("../../utils/constant");
 const {
@@ -48,10 +48,15 @@ let useGPT = DEFAULT_SETTINGS.useGPT;
 let likePostEnabled = DEFAULT_SETTINGS.likePostEnabled;
 let commentLength = DEFAULT_SETTINGS.commentLength;
 let SELECTORS = null;
+let systemPrompt = defaultStartPrompt;
 let userPrompt = DEFAULT_SETTINGS.userPrompt;
 let isInitialized = false;
 let currentUrl = window.location.href;
 let initializationTimeout = null;
+let apiPageStart = 0; // Page start counter
+let processedPostIds = new Set(); // Track processed post IDs to avoid duplicates
+let isApiPaginating = false; // Flag to prevent startScanning interference
+const MAX_API_PAGES = 5; // Maximum pages to visit
 
 // === Delay Management Utilities ===
 const NEXT_ENGAGEMENT_KEY = "mp_next_engagement_time";
@@ -66,10 +71,6 @@ function setNextEngagementTime(min, max) {
   const nextTime = Date.now() + delay;
   localStorage.setItem(NEXT_ENGAGEMENT_KEY, nextTime.toString());
   return delay;
-}
-
-function clearNextEngagementTime() {
-  localStorage.removeItem(NEXT_ENGAGEMENT_KEY);
 }
 
 async function waitForNextEngagement(min, max) {
@@ -196,7 +197,8 @@ async function isCurrentPageManagedTopic() {
               updateLocalStorageObject("topic_eng_data", {
                 topic_id: managedTopic._id,
                 goal_prompt: managedTopic.goal_prompt,
-                list_id: managedTopic.list_id,
+                list_id: managedTopic.segment_id,
+                business_id: managedTopic.business_id,
               });
               // Instead of updateLocalStorageObject calls, use chrome.storage.local.set
               chrome.storage.local.set(
@@ -313,6 +315,7 @@ async function initialize() {
       "likePostEnabled",
       "commentLength",
       "userPrompt",
+      "systemPrompt",
       "topic_eng_data",
     ]);
 
@@ -349,6 +352,7 @@ async function initialize() {
       data?.topic_eng_data?.prompt ||
       data.userPrompt ||
       DEFAULT_SETTINGS.userPrompt;
+    systemPrompt = data.systemPrompt || defaultStartPrompt;
     console.log("refresh setting finished...", data);
   }
 
@@ -382,105 +386,6 @@ async function initialize() {
   console.log("LinkedIn Auto Commenter successfully initialized");
 }
 
-// Start scanning for posts
-async function startScanning() {
-  if (!extensionActive || isProcessing) return;
-
-  // Wait for next allowed engagement time
-  // await waitForNextEngagement(minDelay, maxDelay);
-
-  isProcessing = true;
-
-  // Moved SELECTORS fetch here, so it's fresh for each scan cycle
-  // and checked before proceeding.
-  SELECTORS = await getSelectors();
-
-  if (!SELECTORS) {
-    showNotification(
-      "Failed to load extension selectors. Please try again later!",
-      "warning"
-    );
-    isProcessing = false; // Reset before returning
-    // Schedule a retry for startScanning after a delay.
-    const delay = getRandomDelay(minDelay, maxDelay);
-    setTimeout(() => {
-      if (extensionActive) startScanning();
-    }, delay);
-    return;
-  }
-
-  // Check daily limit *after* ensuring selectors are loaded and *before* heavy processing
-
-  // Check if we've reached the daily limit
-  if (postsLiked >= dailyLimit || commentsPosted >= dailyLimit) {
-    chrome.storage.local.get("limitNotificationShown", function (data) {
-      if (!data.limitNotificationShown) {
-        showNotification(
-          `Congratulations! You have achieved your daily goal of ${dailyLimit} interactions over posts.`,
-          "success"
-        );
-        chrome.storage.local.set({ limitNotificationShown: true });
-      }
-    });
-    // isProcessing will be reset in the finally block.
-    return;
-  }
-
-  try {
-    // Wait for the main post container element to appear
-    // Use the primary selector you expect for post lists.
-    const postListSelector = SELECTORS.postList[0];
-    console.log(`Waiting for element: ${postListSelector}`);
-    await waitForElement(postListSelector, 20000); // Wait up to 15 seconds (adjust as needed)
-    console.log(`Element ${postListSelector} found. Proceeding to scan.`);
-
-    // Now that we know the container exists, proceed with scanning
-    // Add a small delay just in case content inside needs rendering time
-    await new Promise(
-      (resolve) => setTimeout(resolve, getRandomDelay(1000, 2000)) // Shorter delay now
-    );
-
-    // Call the actual scanning logic
-    await engageWithFirstScannedPost();
-    // await scanPosts(); // scanPosts no longer needs the retry logic
-  } catch (error) {
-    // Handle the case where the element doesn't appear within the timeout
-    console.error(
-      `Error waiting for post container (${SELECTORS.postList[0]}):`,
-      error
-    );
-    showNotification("Could not find LinkedIn posts to process.", "warning");
-    chrome.runtime.sendMessage({
-      action: "DELAYED_FEED_REDIRECT",
-      minDelay,
-      maxDelay,
-      url: await getRandomTopicUrl(),
-    });
-    // Decide if you want to retry later or stop
-    // For now, we'll just stop processing for this cycle
-    // The finally block will schedule the next attempt.
-  } finally {
-    isProcessing = false; // Crucial: reset isProcessing in finally
-    // Schedule next scan regardless of success/failure of finding posts in this cycle
-    const delay = getRandomDelay(minDelay, maxDelay);
-    // console.log(`Scheduling next scan in ${delay / 1000} seconds.`);
-    const currentUrlSnapshot = window.location.href; // Capture URL for the check in setTimeout
-    setTimeout(() => {
-      if (extensionActive) {
-        // Only proceed if extension is still globally active
-        if (window.location.href === currentUrlSnapshot) {
-          // Only proceed if URL hasn't changed
-          startScanning();
-        } else {
-          // console.log("StartScanning: Timeout triggered, but URL changed. Not restarting scan on this page.");
-        }
-      } else {
-        // console.log("StartScanning: Timeout triggered, but extension is not active. Not restarting scan.");
-      }
-    }, delay);
-  }
-}
-
 //jession token
 async function getCsrfToken() {
   return new Promise((resolve, reject) => {
@@ -497,6 +402,218 @@ async function getCsrfToken() {
       }
     });
   });
+}
+
+function getKeywordsFromUrl() {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get("keywords") || "";
+}
+
+function getOriginFromUrl() {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get("origin") || "FACETED_SEARCH";
+}
+
+async function fetchPostsFromAPI(start = 0, count = 3) {
+  console.log("Fetching posts from API...", start, count);
+  const keywords = getKeywordsFromUrl();
+  const origin = getOriginFromUrl();
+  const dynamicQueryParams = buildDynamicQueryParams();
+
+  const variablesObj = {
+    start,
+    origin,
+    query: {
+      keywords,
+      flagshipSearchIntent: "SEARCH_SRP",
+      queryParameters: dynamicQueryParams,
+      includeFiltersInResponse: false,
+    },
+    count,
+  };
+
+  const variablesString = `(${Object.entries(variablesObj)
+    .map(([k, v]) => `${k}:${serializeValue(v)}`)
+    .join(",")})`;
+
+  // ❌ REMOVE THIS LINE - This is causing the over-encoding
+  // const encodedVariables = encodeURIComponent(variablesString);
+
+  // ✅ Use raw variables string, only encode spaces in keywords if needed
+  const finalVariables = variablesString.replace(/ /g, "%20"); // Only encode spaces
+
+  const apiUrl = `https://www.linkedin.com/voyager/api/graphql?includeWebMetadata=true&variables=${finalVariables}&queryId=voyagerSearchDashClusters.5ba32757c00b31aea747c8bebb92855c`;
+
+  console.log("Generated URL:", apiUrl); // Debug log to verify
+
+  console.log("Generated variables string:", variablesString); // Debug log
+  console.log("API URL:", apiUrl); // Debug log
+
+  const headers = {
+    accept: "application/vnd.linkedin.normalized+json+2.1",
+    "accept-language": "en-US,en;q=0.9",
+    "csrf-token": await getCsrfToken(),
+    "x-li-lang": "en_US",
+    "x-restli-protocol-version": "2.0.0",
+  };
+
+  try {
+    const resp = await fetch(apiUrl, {
+      method: "GET",
+      headers,
+      credentials: "include",
+      mode: "cors",
+    });
+
+    if (!resp.ok) {
+      console.log(
+        "LinkedIn API fetch posts failed:",
+        resp.status,
+        resp.statusText
+      );
+      return [];
+    }
+
+    const json = await resp.json();
+    console.log("Total posts fetched:", json);
+    if (!json?.included?.length) return [];
+
+    // Filter for actual post data (EntityResultViewModel type)
+    const postElements = json?.included?.filter(
+      (el) =>
+        el.$type === "com.linkedin.voyager.dash.search.EntityResultViewModel" &&
+        el.trackingUrn &&
+        el.summary // Has post content
+    );
+    console.log("Filtered post elements:", postElements);
+    return postElements.map((el) => {
+      // Extract post ID from trackingUrn (urn:li:activity:XXXXXXXXX)
+      const postId = el.trackingUrn.split(":").pop();
+
+      // Extract post content from summary text
+      const content = el.summary?.text || "";
+
+      // Extract actor name from title
+      const actorName = el.title?.text || "";
+
+      // Extract actor profile URL from actorNavigationUrl
+      const actorProfile = el.actorNavigationUrl || "";
+
+      // Build post URL for feed/update page
+      const postUrl = `https://www.linkedin.com/feed/update/urn:li:activity:${postId}`;
+
+      console.log("Extracted post data:", {
+        postId,
+        content,
+        actorName,
+        actorProfile,
+        postUrl,
+      });
+
+      return {
+        postId,
+        content,
+        actorName,
+        actorProfile,
+        postUrl,
+        rawData: el,
+      };
+    });
+  } catch (error) {
+    console.log("Error fetching posts from LinkedIn API:", error);
+    return [];
+  }
+
+  // Your helper functions remain the same
+  function buildDynamicQueryParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramKeys = [
+      "authorCompany",
+      "authorIndustry",
+      "authorJobTitle",
+      "contentType",
+      "datePosted",
+      "fromMember",
+      "fromOrganization",
+      "mentionsMember",
+      "mentionsOrganization",
+      "postedBy",
+      "sortBy",
+    ];
+
+    const queryParams = [];
+    queryParams.push({ key: "resultType", value: ["CONTENT"] });
+
+    paramKeys.forEach((key) => {
+      if (urlParams.has(key)) {
+        let value = urlParams.get(key);
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) {
+            queryParams.push({ key, value: parsed });
+          } else {
+            queryParams.push({ key, value: [parsed] });
+          }
+        } catch (e) {
+          value = value.replace(/^"|"$/g, "");
+          queryParams.push({ key, value: [value] });
+        }
+      }
+    });
+
+    return queryParams;
+  }
+
+  function serializeValue(value) {
+    if (Array.isArray(value)) {
+      return `List(${value.map(serializeValue).join(",")})`;
+    } else if (typeof value === "object" && value !== null) {
+      return `(${Object.entries(value)
+        .map(([k, v]) => `${k}:${serializeValue(v)}`)
+        .join(",")})`;
+    } else {
+      return String(value); // No quotes for LinkedIn format
+    }
+  }
+}
+
+// Start scanning for posts
+async function startScanning() {
+  if (!extensionActive || isProcessing) return;
+  isProcessing = true;
+  try {
+    const result = await engageWithFirstScannedPost();
+    console.log("engageWithFirstScannedPost completed with result:", result);
+
+    // Don't reschedule if pagination is ongoing
+    if (result === "PAGINATION_ONGOING" || isApiPaginating) {
+      console.log("Pagination ongoing, not rescheduling startScanning");
+      return;
+    }
+  } catch (error) {
+    console.error("startScanning error:", error);
+    chrome.runtime.sendMessage({
+      action: "DELAYED_FEED_REDIRECT",
+      minDelay,
+      maxDelay,
+      url: await getRandomTopicUrl(),
+    });
+  } finally {
+    isProcessing = false;
+
+    // Don't reschedule if we're in API pagination mode
+    if (!isApiPaginating) {
+      const delay = getRandomDelay(minDelay, maxDelay);
+      const currentUrlSnapshot = window.location.href;
+      setTimeout(() => {
+        if (extensionActive && window.location.href === currentUrlSnapshot) {
+          startScanning();
+        }
+      }, delay);
+    } else {
+      console.log("API pagination in progress, not rescheduling startScanning");
+    }
+  }
 }
 
 function checkPromotedPosts(post, className = null) {
@@ -545,7 +662,6 @@ async function createContactInBackground(contactData) {
 async function scanPosts() {
   // Select all posts on the feed
   const postContainers = document.querySelectorAll(SELECTORS.postList[0]);
-  // console.log("Found postContainers:", postContainers.length, SELECTORS.postList[0])
   if (postContainers?.length === 0) {
     showNotification("No posts found in this page.", "warning");
     return;
@@ -553,7 +669,7 @@ async function scanPosts() {
 
   postsScanned += postContainers.length;
   updateStats();
-  // isProcessing is handled by startScanning, so no need to manage it here.
+
   let engagedPosts = 0;
   let shouldRefresh = true;
   isProcessing = true;
@@ -561,29 +677,29 @@ async function scanPosts() {
   for (const post of postContainers) {
     const initialUrlForPost = window.location.href;
     let loadingNotification;
+
     try {
       const postId = getPostId(post);
       if (!postId) continue;
 
+      if (lastProcessedPosts.has(postId)) {
+        continue;
+      }
+      lastProcessedPosts.add(postId);
+
+      // Mark post as processed (optional)
       post.setAttribute("data-auto-commenter-processed", "true");
 
       const commentButton =
         post.querySelector(SELECTORS.commentButton[0]) ||
         post.querySelector(SELECTORS.commentButton[1]);
 
-      if (commentButton.hasAttribute("disabled")) continue;
+      if (commentButton?.hasAttribute("disabled")) continue;
 
       const isPromoted = checkPromotedPosts(post);
       if (isPromoted) continue;
 
-      if (lastProcessedPosts.has(postId)) {
-        continue;
-      }
-
-      lastProcessedPosts.add(postId);
-
       const postContent = extractPostContent(post);
-      const topComments = await extractTopComments(post);
 
       if (window.location.href !== initialUrlForPost) {
         console.log(
@@ -598,7 +714,7 @@ async function scanPosts() {
         "loading"
       );
 
-      const generatedComment = await generateComment(postContent, topComments);
+      const generatedComment = await generateComment(postContent);
 
       if (window.location.href !== initialUrlForPost) {
         console.log(
@@ -608,10 +724,11 @@ async function scanPosts() {
         break;
       }
 
-      loadingNotification.closeNotification();
+      if (loadingNotification) loadingNotification.closeNotification();
 
+      // Determine if comment is valid
       let shouldPostComment = true;
-      if (!generatedComment || generatedComment?.includes("NULL")) {
+      if (!generatedComment || generatedComment.includes("NULL")) {
         showNotification(
           "Failed to generate comment, but continuing with engagement.",
           "warning"
@@ -621,7 +738,7 @@ async function scanPosts() {
         showNotification("Comment generated!", "success");
       }
 
-      // Extract firstName, lastName, profile, and avatar before engagement
+      // Extract contact info before engagement
       const { firstName, lastName } = extractFirstAndLastName(post);
       const mp_linkedinProfile = extractLinkedInProfile(post);
       const avatarUrl = extractAvatarUrl(post);
@@ -629,142 +746,112 @@ async function scanPosts() {
       const topicEngData = await getFromChromeStorage("topic_eng_data", {});
 
       if (!topicEngData?.list_id) {
-        // If topic engagement data is available, use it
+        // If no topic engagement data, skip this post or handle as needed
         return;
       }
+
+      let contactCreated = false;
+      let contactData;
+
       try {
-        const contactData = await createContactInBackground({
+        contactData = await createContactInBackground({
           firstName,
           lastName,
           mp_linkedinProfile,
           list_id: topicEngData.list_id,
-          avatar: avatarUrl, // Add avatar field if your API supports it
+          avatar: avatarUrl,
         });
-        console.log("Contact created successfully:", contactData);
-        contactCreated = true;
 
-        // Store contact data and post information in topic_eng_data
+        contactCreated = true;
+        console.log("Contact created successfully:", contactData);
+
         updateLocalStorageObject("topic_eng_data", {
           contact_id: contactData.id || contactData._id,
           business_id: contactData.business_id,
           user_profile_url: mp_linkedinProfile,
           current_post_id: postId,
         });
-
-        // Handle like
-        if (likePostEnabled) {
-          try {
-            await handleLikePost(post, contactData._id);
-            likeSuccess = true;
-          } catch (likeError) {
-            console.log("Failed to like post:", likeError);
-            likeSuccess = false;
-          }
-        } else {
-          likeSuccess = true; // Consider as success if liking is disabled
-        }
-
-        await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(6000, 12000)) // Shorter delay now
-        );
-
-        // Handle comment
-        if (shouldPostComment) {
-          try {
-            await postComment(post, generatedComment, contactData.id);
-            commentSuccess = true;
-            await new Promise(
-              (resolve) => setTimeout(resolve, getRandomDelay(2000, 3000)) // Shorter delay now
-            );
-          } catch (commentError) {
-            console.log("Failed to post comment:", commentError);
-            commentSuccess = false;
-          }
-        } else {
-          commentSuccess = false; // No comment to post
-        }
-
-        engagedPosts++;
-
-        // Get the current post's poster profile URL
-        // const posterProfileUrl = await getCurrentPostPosterProfileUrl();
-        // updateLocalStorageObject("topic_eng_data", {
-        //   posterProfileUrl: posterProfileUrl, // Store the poster's profile URL
-        // });
-
-        // Determine redirect based on success states
-        // let redirectUrl;
-        // if (
-        //   contactCreated &&
-        //   likeSuccess &&
-        //   (commentSuccess || !shouldPostComment)
-        // ) {
-        //   // Contact success + Like success + (Comment success OR no comment needed)
-        //   redirectUrl = posterProfileUrl;
-        // } else if (
-        //   contactCreated &&
-        //   likeSuccess &&
-        //   !commentSuccess &&
-        //   shouldPostComment
-        // ) {
-        //   // Contact success + Like success + Comment failed
-        //   redirectUrl = posterProfileUrl;
-        // } else {
-        //   // Any other case where contact succeeded but other operations had issues
-        //   redirectUrl = posterProfileUrl;
-        // }
-
-        // Send message to background to handle delay and redirect
-        // chrome.runtime.sendMessage({
-        //   action: "DELAYED_FEED_REDIRECT",
-        //   minDelay,
-        //   maxDelay,
-        //   url: redirectUrl,
-        // });
-        chrome.runtime.sendMessage({
-          action: "DELAYED_FEED_REDIRECT",
-          minDelay,
-          maxDelay,
-          url: await getRandomTopicUrl(),
-        });
       } catch (contactError) {
         console.log("Failed to create contact:", contactError);
-        contactCreated = false;
         showNotification(
           "Failed to create contact. Redirecting to random topic.",
           "error"
         );
 
-        // Contact creation failed - redirect to random topic
         chrome.runtime.sendMessage({
           action: "DELAYED_FEED_REDIRECT",
           minDelay,
           maxDelay,
           url: await getRandomTopicUrl(),
         });
+
+        // Skip this post and continue with others
         continue;
       }
-    } catch (error) {
-      // General error - redirect to random topic
+
+      // Handle Like - always attempt if enabled
+      let likeSuccess = false;
+      if (likePostEnabled) {
+        try {
+          await handleLikePost(post, contactData._id);
+          likeSuccess = true;
+        } catch (likeError) {
+          console.log("Failed to like post:", likeError);
+          likeSuccess = false;
+        }
+      } else {
+        likeSuccess = true; // Consider success if liking disabled
+      }
+
+      // Small delay for natural behavior
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRandomDelay(6000, 12000))
+      );
+
+      // Handle comment posting only if shouldPostComment is true
+      let commentSuccess = false;
+      if (shouldPostComment) {
+        try {
+          await postComment(post, generatedComment, contactData.id);
+          commentSuccess = true;
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, getRandomDelay(2000, 3000))
+          );
+        } catch (commentError) {
+          console.log("Failed to post comment:", commentError);
+          commentSuccess = false;
+        }
+      } else {
+        commentSuccess = false;
+      }
+
+      engagedPosts++;
+
+      // Proceed with redirect to a random topic URL (or customize as needed)
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
         url: await getRandomTopicUrl(),
       });
-      console.error("Error generating or posting comment:", error);
+    } catch (error) {
+      // General error handling
+      chrome.runtime.sendMessage({
+        action: "DELAYED_FEED_REDIRECT",
+        minDelay,
+        maxDelay,
+        url: await getRandomTopicUrl(),
+      });
+      console.log("Error generating or posting comment:", error);
       showNotification("Error generating comment", "error");
     }
 
+    // Break after processing one post (you can remove if you want to process all)
     break;
   }
 
-  // if (engagedPosts === 0 && shouldRefresh) {
-  //   refreshPosts();
-  // }
-
-  // isProcessing is handled by startScanning's finally block.
-  // Update storage
+  // Update total scanned posts count in storage
   chrome.storage.local.set({ postsScanned: postsScanned });
 }
 
@@ -785,69 +872,27 @@ function extractPostContent(post) {
   return post.textContent.trim();
 }
 
-// Extract top comments
-async function extractTopComments(post) {
-  const comments = [];
-
-  const commentBtns = post.getElementsByClassName(
-    SELECTORS.openCommentButton[0]
-  );
-  const commentBtn = commentBtns?.length ? commentBtns[0] : null;
-  if (!commentBtn) return comments;
-
-  simulateMouseClick(commentBtn);
-  await new Promise((resolve) =>
-    setTimeout(resolve, getRandomDelay(2000, 5000))
-  );
-
-  const loadMoreBtns = post.getElementsByClassName(
-    SELECTORS.loadMoreComments[0]
-  );
-
-  const loadMoreBtn = loadMoreBtns?.length ? loadMoreBtns[0] : null;
-  if (loadMoreBtn) {
-    simulateMouseClick(loadMoreBtn);
-    await new Promise((resolve) =>
-      setTimeout(resolve, getRandomDelay(2000, 5000))
-    );
-  }
-  // Find comment elements
-  const commentElements =
-    post.querySelectorAll(SELECTORS.commentElements[0]) ||
-    post.querySelectorAll(SELECTORS.commentElements[1]);
-
-  // Get up to 3 comments
-  for (let i = 0; i < Math.min(3, commentElements.length); i++) {
-    const commentText = commentElements[i].textContent.trim();
-    comments.push(commentText);
-  }
-
-  return comments;
-}
-
 // Generate comment using GPT or custom logic
-async function generateComment(postContent, topComments) {
-  return await generateGPTComment(postContent, topComments);
+async function generateComment(postContent) {
+  return await generateGPTComment(postContent);
 }
 
 // Generate comment using GPT API
-async function generateGPTComment(postContent, topComments) {
+async function generateGPTComment(postContent) {
   try {
     const max_words = commentLength;
     const prompt = `Generate comment for post: "${postContent}"`;
-    const finalSystemPrompt = [
-      defaultStartPrompt.trim(),
-      userPrompt.trim(),
-      defaultEndPrompt.trim(),
-    ].join("\n");
-    const systemPrompt = finalSystemPrompt.replace("{{MAX_WORDS}}", max_words);
+    const finalSystemPrompt = [systemPrompt.trim(), userPrompt.trim()].join(
+      "\n"
+    );
+    const systemPrompts = finalSystemPrompt.replace("{{MAX_WORDS}}", max_words);
 
     const body = JSON.stringify({
       model: "llama3.1:latest",
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: systemPrompts,
           // content: `You are a professional comment generator. Generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: Match the topic and tone without deviation; be supportive, non-aggressive, and use direct address ('you'/'your'); keep the comment within ${max_words} words; reference specific details from the post/comments; do not ask questions; synthesize ideas uniquely without copying top comments; if unable to generate properly, return NULL. Output only the comment text or NULL—no explanations, markdown, or extra text.  Example Output: Good to hear you've learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
           // `You are a professional comment generator. You need to generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: 1. Relevance: Match the topic and tone of the post and comments. Do not deviate. 2. Tone: Be supportive, non-aggressive, and avoid argumentative/questioning language. Always use direct address ('you/your'). 3. Conciseness: ${sentanceLength} sentences max. Avoid generic phrases (e.g., 'Great post!') 4. Specificity: Reference details from the post/comments (e.g., skills, achievements, goals). 5. No Questions: Do not ask for clarifications, opinions, or further details. 6. Originality: Do not repeat top comments verbatim. Synthesize ideas uniquely. 7. Output: Return only the comment text. No explanations, markdown, or extra text. Example Output: Good to hear you've learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
         },
@@ -1026,43 +1071,6 @@ function addCommentButtonListner(post, commentInput, submitButton) {
   }
 }
 
-async function getCommentUrl(post) {
-  try {
-    const commentElements =
-      post.querySelectorAll(SELECTORS.commentElements[0]) ||
-      post.querySelectorAll(SELECTORS.commentElements[1]);
-    if (!commentElements?.length) {
-      console.log("No comment elements found for post!");
-      return;
-    }
-
-    const commentElement = commentElements[0];
-    const userComment = commentElement.querySelector(SELECTORS.commentURN[0]);
-
-    if (!userComment) {
-      console.log("No user comment found for post");
-      return;
-    }
-
-    const commentURN = userComment.getAttribute("data-id");
-    if (!commentURN) {
-      console.log("No comment URN found for post");
-      return;
-    }
-
-    // const postId = getPostId(post);
-    const commentURL = `${getPostUrl(post)}?commentUrn=${commentURN}`;
-
-    await tracker.addEngagement({
-      postId: getPostId(post),
-      commentURL,
-    });
-  } catch (e) {
-    console.error("Error getting comment url: ", e);
-  }
-}
-
-// Post comment to LinkedIn
 async function postComment(post, comment) {
   try {
     // Find comment input field
@@ -1228,101 +1236,40 @@ async function checkIfPostEngaged(postId) {
   });
 }
 
-async function checkPostRelevance(postElement) {
+async function checkPostRelevanceAPIpost(postContent) {
   try {
-    // Extract post content from the post element
-    const postContent = extractPostContent(postElement);
     const topicEngData = await getFromChromeStorage("topic_eng_data", {});
-
-    // Validate that we have the required data
-    if (
-      !topicEngData.business_id ||
-      !topicEngData.topic_id ||
-      !topicEngData?.goal_prompt
-    ) {
-      console.error("Missing required topic engagement data:", topicEngData);
-      return;
-    }
-    if (!postContent) {
-      console.log("No post content found");
-      return null;
-    }
-
-    const userPrompt = `BUSINESS GOAL: ${topicEngData?.goal_prompt} 
-    LINKEDIN POST: ${postContent}`;
-
+    if (!topicEngData?.goal_prompt) return null;
+    const userPrompt = `BUSINESS GOAL: ${topicEngData?.goal_prompt}\nLINKEDIN POST: ${postContent}`;
     const body = JSON.stringify({
       model: "llama3.1:latest",
       messages: [
-        {
-          role: "system",
-          content: topicSystemPrompt,
-        },
-        { role: "user", content: postContent },
+        { role: "system", content: topicSystemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      options: {
-        max_token: 100,
-        repeat_penalty: 1.2,
-        temperature: 0.7,
-      },
+      options: { max_token: 100, repeat_penalty: 1.2, temperature: 0.7 },
     });
-
     const serverUrl = `${APIURL}/ai/chat`;
-
     const data = await callApi({
       action: "API_POST_GENERATE_MESSAGE",
       url: serverUrl,
       method: "POST",
       body,
     });
-
-    // Extract the relevance result from the API response
-    const relevanceResult = data?.response || data?.message || null;
-    console.log(`Relevance check result: ${relevanceResult}`);
-
-    return relevanceResult;
+    return data?.data?.data || null;
   } catch (error) {
     console.error("Error checking post relevance:", error);
-    return null; // Return null on error to skip the post
+    return null;
   }
 }
 
-// Function to get the current post's poster profile URL
-async function getCurrentPostPosterProfileUrl() {
-  try {
-    // Wait for the post header to load
-    // await waitForElement(".feed-shared-update-v2__description-wrapper", 5000);
-
-    // Find the span with the user's name and get its parent anchor tag
-    const nameSpan = document.querySelector(".update-components-actor__title");
-
-    if (nameSpan) {
-      // Get the parent anchor tag
-      const parentAnchor = nameSpan.closest("a");
-
-      if (parentAnchor && parentAnchor.href) {
-        // Clean the URL by removing query parameters
-        const cleanUrl = parentAnchor.href.split("?")[0];
-        console.log("Found and cleaned poster profile URL:", cleanUrl);
-        return cleanUrl;
-      }
-    }
-
-    console.warn(
-      "Could not find poster profile URL from .update-components-actor__title"
-    );
-    await setToChromeStorage("topic_eng_data", {});
-    return await getRandomTopicUrl();
-  } catch (error) {
-    console.error("Error getting poster profile URL:", error);
-    await setToChromeStorage("topic_eng_data", {});
-    return await getRandomTopicUrl();
-  }
-}
-
-// === Custom workflow: Go to first eligible post, then run scanPosts for comment/like ===
 async function engageWithFirstScannedPost() {
+  console.log(
+    `=== engageWithFirstScannedPost ENTRY === apiPageStart: ${apiPageStart}`
+  );
+
   if (postsLiked >= dailyLimit || commentsPosted >= dailyLimit) {
+    console.log("Daily limit reached, exiting");
     chrome.storage.local.get("limitNotificationShown", function (data) {
       if (!data.limitNotificationShown) {
         showNotification(
@@ -1332,114 +1279,278 @@ async function engageWithFirstScannedPost() {
         chrome.storage.local.set({ limitNotificationShown: true });
       }
     });
-    return;
+    return "DAILY_LIMIT_REACHED";
   }
-  if (window.__mp_engaged_specific_post) return;
+
+  if (window.__mp_engaged_specific_post) {
+    console.log(
+      "Already processing, exiting due to __mp_engaged_specific_post flag"
+    );
+    return "ALREADY_PROCESSING";
+  }
+
   window.__mp_engaged_specific_post = true;
+  console.log(
+    `Set __mp_engaged_specific_post to true, proceeding with apiPageStart: ${apiPageStart}`
+  );
 
-  // Wait for next allowed engagement time
-
-  // Wait for selectors to load
   SELECTORS = await getSelectors();
   if (!SELECTORS) {
     showNotification(
       "Failed to load extension selectors. Please try again later!",
       "warning"
     );
-    return;
+    return "SELECTORS_FAILED";
   }
 
-  // If we're on the feed, scan for the first eligible post and redirect to it
+  // For /search/results/content, use API with dynamic parameters
   if (window.location.pathname?.startsWith("/search/results/content")) {
+    console.log("Processing search results page with API");
     try {
-      await waitForNextEngagement(minDelay, maxDelay);
-      const postListSelector = SELECTORS.postList[0];
-      await waitForElement(postListSelector, 20000);
-      const postContainers = document.querySelectorAll(postListSelector);
-      let foundPostId = null;
-
-      for (const post of postContainers) {
-        const postId = getPostId(post);
-        if (!postId) continue;
-
-        // Check if already engaged via API only
-        const engagementResult = await checkIfPostEngaged(postId);
+      // Only wait on the FIRST page (page 0), skip wait on subsequent pages
+      if (apiPageStart === 0) {
+        console.log("First page - waiting for next engagement timing");
+        await waitForNextEngagement(minDelay, maxDelay);
+      } else {
         console.log(
-          `Checking post ${postId} engagement status...`,
-          engagementResult
+          `Page ${apiPageStart} - skipping wait for faster pagination`
         );
-
-        // If there's an error in the API response, skip this post
-        if (engagementResult === false) {
-          console.log(`Post ${postId} has API error, skipping...`);
-          continue; // Go to next post in the list
-        }
-
-        // If no engagement data (null/undefined), check post relevance
-        console.log(`Checking post ${postId} relevance...`);
-        const relevanceResult = await checkPostRelevance(post);
-
-        // Skip if relevance check returns null or "Not Relevant"
-        if (
-          !relevanceResult ||
-          relevanceResult === null ||
-          !relevanceResult.toLowerCase().includes("relevant")
-        ) {
-          console.log(`Post ${postId} is not relevant, skipping...`);
-          continue; // Go to next post in the list
-        }
-
-        // If we reach here, post is eligible and relevant
-        foundPostId = postId;
-        console.log(`Found relevant post: ${postId}`);
-        break; // Found eligible post, exit loop
       }
 
-      if (!foundPostId) {
+      let foundPostId = null;
+      let allPostsProcessed = true; // Track if all posts are processed
+
+      // Fetch posts with current page start
+      console.log(`Fetching posts with apiPageStart: ${apiPageStart}`);
+      const posts = await fetchPostsFromAPI(apiPageStart);
+      console.log(`Fetched ${posts.length} posts from API`);
+      console.log(
+        `API Response for start=${apiPageStart}:`,
+        posts.map((p) => ({
+          postId: p.postId,
+          content: p.content.substring(0, 50) + "...",
+        }))
+      );
+
+      if (!posts.length) {
+        console.log("No posts found, redirecting");
         showNotification(
           "No eligible and relevant post found to engage.",
           "warning"
         );
-        return;
+        isApiPaginating = false;
+        processedPostIds.clear();
+        chrome.runtime.sendMessage({
+          action: "DELAYED_FEED_REDIRECT",
+          minDelay,
+          maxDelay,
+          url: await getRandomTopicUrl(),
+        });
+        return "NO_POSTS_FOUND";
       }
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, getRandomDelay(5000, 10000))
+      // Filter out already processed posts to avoid duplicates
+      const newPosts = posts.filter(
+        (post) => !processedPostIds.has(post.postId)
+      );
+      console.log(
+        `Found ${newPosts.length} new posts after filtering ${
+          posts.length - newPosts.length
+        } duplicates`
       );
 
-      // Redirect to the post page
-      const postUrl = `https://www.linkedin.com/feed/update/${foundPostId}`;
-      window.location.href = postUrl;
-      return;
+      if (!newPosts.length) {
+        console.log("No new posts found after filtering duplicates");
+        // If no new posts, try increasing the start parameter more aggressively
+        apiPageStart += 3; // Skip further ahead
+
+        if (apiPageStart >= MAX_API_PAGES * 3) {
+          console.log("Exhausted pagination attempts, redirecting");
+          isApiPaginating = false;
+          processedPostIds.clear();
+          apiPageStart = 0;
+          chrome.runtime.sendMessage({
+            action: "DELAYED_FEED_REDIRECT",
+            minDelay,
+            maxDelay,
+            url: await getRandomTopicUrl(),
+          });
+          return "NO_NEW_POSTS";
+        }
+
+        // Try next page immediately
+        window.__mp_engaged_specific_post = false;
+        return await engageWithFirstScannedPost();
+      }
+
+      // Process only new posts
+      for (const post of newPosts) {
+        // Add to processed set immediately to prevent reprocessing
+        processedPostIds.add(post.postId);
+
+        console.log(`Processing new post ${post.postId}`);
+        const postUrn = "urn:li:activity:" + post.postId;
+        const engaged = await checkIfPostEngaged(postUrn);
+        console.log(`Post ${post.postId} engagement status:`, engaged);
+
+        // If engaged = false, means already engaged (skip)
+        // If engaged = true, means not engaged yet (check relevance)
+        if (!engaged) {
+          console.log(`Post ${post.postId} already engaged, skipping.`);
+          continue; // This post is processed (already engaged)
+        }
+
+        // Post is not engaged, check relevance
+        console.log(`Checking relevance for post ${post.postId}`);
+        const relevanceResult = await checkPostRelevanceAPIpost(post.content);
+        const relevanceText = String(relevanceResult || "")
+          .toLowerCase()
+          .trim();
+        const NOT_RELEVANT_REGEX = /\bnot relevant\b/;
+        const RELEVANT_REGEX = /\brelevant\b/;
+
+        console.log(`Post ${post.postId} relevance result:`, relevanceResult);
+
+        if (
+          !relevanceResult ||
+          relevanceResult === null ||
+          relevanceText === "" ||
+          NOT_RELEVANT_REGEX.test(relevanceText)
+        ) {
+          console.log(`Post ${post.postId} is not relevant, skipping...`);
+          continue; // This post is processed (not relevant)
+        }
+
+        if (RELEVANT_REGEX.test(relevanceText)) {
+          console.log(`Found relevant post ${post.postId} to engage with!`);
+          foundPostId = post.postId;
+          allPostsProcessed = false; // We found a post to engage, so not all processed
+          break;
+        }
+      }
+
+      if (foundPostId) {
+        console.log(`Engaging with post ${foundPostId}`);
+        // Reset counters and clear processed posts when we find a post to engage with
+        apiPageStart = 0;
+        processedPostIds.clear(); // Clear the processed posts set
+        isApiPaginating = false;
+        await new Promise((resolve) =>
+          setTimeout(resolve, getRandomDelay(5000, 10000))
+        );
+        const postUrn = `urn:li:activity:${foundPostId}`;
+        const postUrl = `https://www.linkedin.com/feed/update/${postUrn}`;
+        console.log(`Redirecting to post URL: ${postUrl}`);
+        window.location.href = postUrl;
+        return "POST_FOUND";
+      }
+
+      // Only increment page start if ALL posts were processed (engaged or not relevant)
+      if (allPostsProcessed) {
+        apiPageStart += 3; // Increment by 3 for next batch of posts
+        console.log(
+          `All posts on page processed. Moving to next page start: ${apiPageStart}`
+        );
+
+        // Check if we've reached the maximum page limit
+        if (apiPageStart >= MAX_API_PAGES * 3) {
+          console.log(
+            `Reached maximum page limit. Redirecting to random topic.`
+          );
+          showNotification(
+            `Checked ${MAX_API_PAGES} pages, no relevant posts found.`,
+            "info"
+          );
+
+          // Reset counters and clear processed posts
+          apiPageStart = 0;
+          processedPostIds.clear();
+          isApiPaginating = false;
+
+          chrome.runtime.sendMessage({
+            action: "DELAYED_FEED_REDIRECT",
+            minDelay,
+            maxDelay,
+            url: await getRandomTopicUrl(),
+          });
+          return "MAX_PAGES_REACHED";
+        }
+
+        // Set pagination flag to prevent startScanning interference
+        isApiPaginating = true;
+
+        // Reset the flag to allow recursive processing
+        window.__mp_engaged_specific_post = false;
+
+        console.log("About to wait before recursive call...");
+        await new Promise(
+          (resolve) => setTimeout(resolve, getRandomDelay(15000, 22000)) // Shorter delay for pagination
+        );
+
+        console.log(
+          "Wait completed, about to call engageWithFirstScannedPost recursively..."
+        );
+        console.log("Current URL:", window.location.href);
+        console.log("Current pathname:", window.location.pathname);
+
+        try {
+          const result = await engageWithFirstScannedPost(); // Recursive call for next page
+          console.log(
+            "Recursive call to engageWithFirstScannedPost completed with result:",
+            result
+          );
+          return result;
+        } catch (recursiveError) {
+          console.error(
+            "Error in recursive engageWithFirstScannedPost call:",
+            recursiveError
+          );
+          isApiPaginating = false;
+          throw recursiveError;
+        }
+      }
     } catch (e) {
+      console.error("Error in search results processing:", e);
+      // Reset counters on error
+      apiPageStart = 0;
+      processedPostIds.clear();
+      isApiPaginating = false;
+
       showNotification("Error finding post to engage.", "error");
-      return;
-    }
-  }
-  // If we're on a post page, run scanPosts to handle comment/like
-  if (window.location.pathname.startsWith("/feed/update/")) {
-    try {
-      // Get current post ID from URL
-      // Check if current post is already engaged
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, getRandomDelay(1000, 2000))
-      );
-      await scanPosts();
-    } catch (e) {
-      showNotification("Error engaging with post.", "error");
-
-      // Get the current post's poster profile URL even on error
-
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
-        url: await getRandomTopicUrl(), // Pass the poster's profile URL
+        url: await getRandomTopicUrl(),
       });
+      return "ERROR_OCCURRED";
     }
-    return;
   }
+
+  // For individual post pages, continue with existing DOM engagement logic
+  if (window.location.pathname.startsWith("/feed/update/")) {
+    console.log("Processing individual post page");
+    try {
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRandomDelay(1000, 2000))
+      );
+      await scanPosts();
+      return "POST_PAGE_PROCESSED";
+    } catch (e) {
+      console.error("Error engaging with post:", e);
+      showNotification("Error engaging with post.", "error");
+      chrome.runtime.sendMessage({
+        action: "DELAYED_FEED_REDIRECT",
+        minDelay,
+        maxDelay,
+        url: await getRandomTopicUrl(),
+      });
+      return "POST_ENGAGEMENT_ERROR";
+    }
+  }
+
+  console.log("No matching page type found");
+  return "NO_ACTION_TAKEN";
 }
 
 // Initial load

@@ -869,3 +869,116 @@ const { APIURL } = require("../../utils/constant");
     run();
   }
 })();
+
+
+(async function () {
+  let hasChecked = false;
+
+  // Function to extract LinkedIn vanity name from DOM
+  function extractLinkedInVanityName() {
+    // Quick win: URL extraction
+    const urlMatch = window.location.href.match(/\/in\/([^\/\?#]+)/);
+    if (urlMatch) return urlMatch[1];
+    
+    // Search code tags with profile data
+    const codeTags = document.querySelectorAll('code');
+    
+    for (let codeTag of codeTags) {
+      const content = codeTag.textContent;
+      
+      // Skip empty or small content
+      if (!content || content.length < 50) continue;
+      
+      // Look for LinkedIn profile indicators
+      if (content.includes('publicIdentifier') && 
+          (content.includes('MiniProfile') || content.includes('fs_miniProfile'))) {
+        
+        try {
+          const data = JSON.parse(content);
+          
+          // Method A: Check included array
+          if (data.included && Array.isArray(data.included)) {
+            for (let item of data.included) {
+              if (item.publicIdentifier && 
+                  item.$type && 
+                  item.$type.includes('MiniProfile')) {
+                return item.publicIdentifier;
+              }
+            }
+          }
+          
+          // Method B: Direct property check
+          if (data.publicIdentifier) {
+            return data.publicIdentifier;
+          }
+          
+        } catch (parseError) {
+          // Fallback: regex extraction
+          const match = content.match(/"publicIdentifier":\s*"([^"]+)"/);
+          if (match) return match[1];
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // Check and update user_info only if not already stored
+  function checkAndUpdateUserInfo() {
+    if (hasChecked) return; // Don't check again if already done
+
+    const vanityName = extractLinkedInVanityName();
+    if (!vanityName) return;
+
+    console.log("🔍 Found vanity name:", vanityName);
+
+    chrome.storage.local.get(["user_info"], (result) => {
+      if (chrome.runtime.lastError) {
+        console.error("Chrome storage error:", chrome.runtime.lastError);
+        return;
+      }
+
+      // If user_info doesn't exist OR it doesn't match current vanityName, save/update it
+      if (!result.user_info || result.user_info !== vanityName) {
+        chrome.storage.local.set({ user_info: vanityName }, () => {
+          if (!chrome.runtime.lastError) {
+            if (!result.user_info) {
+              console.log("✅ user_info saved:", vanityName);
+            } else {
+              console.log(
+                "🔄 user_info updated from",
+                result.user_info,
+                "to",
+                vanityName
+              );
+            }
+            hasChecked = true; // Mark as checked so we don't do it again
+          }
+        });
+      } else {
+        console.log(
+          "ℹ️ user_info already matches current profile:",
+          result.user_info
+        );
+        hasChecked = true; // Mark as checked
+      }
+    });
+  }
+
+  // Initial check on load
+  checkAndUpdateUserInfo();
+
+  // Only observe if we haven't found and saved the info yet
+  const observer = new MutationObserver(() => {
+    if (!hasChecked) {
+      checkAndUpdateUserInfo();
+    } else {
+      observer.disconnect(); // Stop observing once we've got the info
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+})();

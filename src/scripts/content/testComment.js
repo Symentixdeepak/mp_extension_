@@ -1,14 +1,19 @@
 // Test Comment Button & Drawer Content Script (self-contained)
 
-const { APIURL, MaxTokens, defaultStartPrompt, defaultEndPrompt } = require("../../utils/constant");
+const {
+  APIURL,
+  MaxTokens,
+  defaultStartPrompt,
+  defaultEndPrompt,
+} = require("../../utils/constant");
 const { showNotification } = require("../../utils/notification");
 
 (function () {
   // Inject custom styles for the drawer and its contents
   function injectDrawerStyles() {
-    if (document.getElementById('mp-test-drawer-style')) return;
-    const style = document.createElement('style');
-    style.id = 'mp-test-drawer-style';
+    if (document.getElementById("mp-test-drawer-style")) return;
+    const style = document.createElement("style");
+    style.id = "mp-test-drawer-style";
     style.textContent = `
       .mp-test-drawer-overlay {
         position: fixed; inset: 0; background: rgba(0,0,0,0.30); z-index: 99998; transition: opacity 0.3s;
@@ -113,7 +118,7 @@ const { showNotification } = require("../../utils/notification");
     if (overlay) overlay.remove();
 
     // Find main LinkedIn feed container
-    let parent = document.querySelector('div.feed-outlet, main, #main, body');
+    let parent = document.querySelector("div.feed-outlet, main, #main, body");
     if (!parent) parent = document.body;
 
     // Overlay
@@ -163,7 +168,8 @@ const { showNotification } = require("../../utils/notification");
     mainTitle.textContent = "Generate Comment through AI";
     mainTitle.className = "mp-test-drawer-section-title";
     const desc = document.createElement("p");
-    desc.textContent = "Use AI to generate a professional, relevant comment for this LinkedIn post. Optionally, save your favorite prompt for future use.";
+    desc.textContent =
+      "Use AI to generate a professional, relevant comment for this LinkedIn post. Optionally, save your favorite prompt for future use.";
     desc.className = "mp-test-drawer-desc";
     sectionTitle.appendChild(mainTitle);
     sectionTitle.appendChild(desc);
@@ -207,12 +213,11 @@ const { showNotification } = require("../../utils/notification");
       generateBtn.disabled = isLoading;
       savePromptBtn.disabled = isLoading;
     }
-    promptInput.addEventListener('input', updatePromptButtons);
+    promptInput.addEventListener("input", updatePromptButtons);
     // Initial state
     updatePromptButtons();
 
     // Notification utility (if not already available)
-
 
     // Section: Output
     const outputSection = document.createElement("div");
@@ -250,7 +255,7 @@ const { showNotification } = require("../../utils/notification");
       output.textContent = "Generating...";
       useBtn.classList.add("hidden");
       successMsg.classList.remove("active");
-    
+
       // Insert note element before output, if it doesn't exist
       let noteEl = outputSection.querySelector(".mp-test-drawer-note");
       if (!noteEl) {
@@ -262,26 +267,29 @@ const { showNotification } = require("../../utils/notification");
         noteEl.style.display = "none";
         outputSection.insertBefore(noteEl, output);
       }
-    
+
       const originalText = generateBtn.textContent;
       generateBtn.innerHTML = `<span class='mp-test-spinner' style='display:inline-block;vertical-align:middle;margin-right:8px;width:18px;height:18px;border:2.5px solid #fff;border-right-color:transparent;border-radius:50%;animation:mp-spin 0.7s linear infinite;'></span>Generating...`;
-    
+
       try {
         const userPrompt = promptInput.value.trim() || "";
         let comment = await onGenerate(userPrompt);
-        const isInvalid = !comment || comment === "NULL" || comment.includes("I can't generate a comment");
+        const isInvalid =
+          !comment ||
+          comment === "NULL" ||
+          comment.includes("I can't generate a comment");
 
-        if (typeof comment === 'string') {
+        if (typeof comment === "string") {
           comment = comment.trim();
           if (comment.startsWith('"') && comment.endsWith('"')) {
             comment = comment.slice(1, -1).trim();
           }
         }
-    
-    
+
         if (isInvalid) {
           output.textContent = comment || "No comment generated.";
-          noteEl.textContent = "Note: This comment may not be suitable or was skipped by AI due to context.";
+          noteEl.textContent =
+            "Note: This comment may not be suitable or was skipped by AI due to context.";
           noteEl.style.display = "block";
           useBtn.classList.add("hidden");
         } else {
@@ -289,7 +297,7 @@ const { showNotification } = require("../../utils/notification");
           noteEl.style.display = "none";
           useBtn.classList.remove("hidden");
         }
-    
+
         outputSection.style.display = "block";
       } catch (e) {
         output.textContent = "Error generating comment.";
@@ -301,13 +309,13 @@ const { showNotification } = require("../../utils/notification");
         updatePromptButtons();
       }
     };
-    
+
     savePromptBtn.onclick = () => {
       const userPrompt = promptInput.value.trim() || "";
       chrome.storage.local.set({ userPrompt }, () => {
         savePromptBtn.textContent = "Saved!";
         savePromptBtn.classList.add("bg-green-100", "text-green-700");
-        showNotification('Prompt saved successfully', 'success');
+        showNotification("Prompt saved successfully", "success");
         setTimeout(() => {
           savePromptBtn.textContent = "Save Prompt";
           savePromptBtn.classList.remove("bg-green-100", "text-green-700");
@@ -326,15 +334,16 @@ const { showNotification } = require("../../utils/notification");
         // Try to fill the comment box in the same post
         let input = null;
         // Try all selectors in order
-        input = post.querySelector('div[contenteditable="true"][role="textbox"]')
-          || post.querySelector('.comments-comment-box__form-contenteditable')
-          || post.querySelector('.ql-editor');
+        input =
+          post.querySelector('div[contenteditable="true"][role="textbox"]') ||
+          post.querySelector(".comments-comment-box__form-contenteditable") ||
+          post.querySelector(".ql-editor");
         if (input) {
           // Set the value/content (simulate user input for React/LinkedIn)
           input.focus();
           // Remove all children and set text
-          input.innerHTML = '';
-          document.execCommand('insertText', false, comment);
+          input.innerHTML = "";
+          document.execCommand("insertText", false, comment);
           // Place cursor at end
           const range = document.createRange();
           range.selectNodeContents(input);
@@ -343,7 +352,7 @@ const { showNotification } = require("../../utils/notification");
           sel.removeAllRanges();
           sel.addRange(range);
           // Optionally trigger input event
-          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event("input", { bubbles: true }));
         } else {
           // Fallback: copy to clipboard
           navigator.clipboard.writeText(comment);
@@ -381,31 +390,36 @@ const { showNotification } = require("../../utils/notification");
   // Utility: Inject Test Comment button into the post's action bar
   function injectTestCommentButton(post, postContent) {
     // Prevent duplicate buttons in the comment box
-    const commentForm = post.querySelector('form.comments-comment-box__form');
-    if (!commentForm || commentForm.querySelector('.mp-test-comment-btn')) return;
+    const commentForm = post.querySelector("form.comments-comment-box__form");
+    if (!commentForm || commentForm.querySelector(".mp-test-comment-btn"))
+      return;
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'mp-test-comment-btn flex items-center justify-center';
-    btn.style.background = 'rgb(16, 17, 18)';
-    btn.style.color = 'rgb(255, 255, 255)';
-    btn.style.fontWeight = '400';
-    btn.style.fontSize = '10px';
-    btn.style.border = 'none';
-    btn.style.borderRadius = '7px';
-    btn.style.padding = '0px 6px 4px 2px';
-    btn.style.marginTop = '5px';
-    btn.style.marginRight = '8px';
-    btn.style.height = '30px';
-    btn.style.marginLeft = '6px';
-    btn.style.display = 'flex';
-    btn.style.alignItems = 'center';
-    btn.style.justifyContent = 'center';
-    btn.style.cursor = 'pointer';
-    btn.style.transition = 'background 0.18s';
-    btn.title = 'AI Comment';
-    btn.onmouseenter = () => { btn.style.background = 'rgb(35, 35, 37)'; };
-    btn.onmouseleave = () => { btn.style.background = 'rgb(16, 17, 18)'; };
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mp-test-comment-btn flex items-center justify-center";
+    btn.style.background = "rgb(16, 17, 18)";
+    btn.style.color = "rgb(255, 255, 255)";
+    btn.style.fontWeight = "400";
+    btn.style.fontSize = "10px";
+    btn.style.border = "none";
+    btn.style.borderRadius = "7px";
+    btn.style.padding = "0px 6px 4px 2px";
+    btn.style.marginTop = "5px";
+    btn.style.marginRight = "8px";
+    btn.style.height = "30px";
+    btn.style.marginLeft = "6px";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.cursor = "pointer";
+    btn.style.transition = "background 0.18s";
+    btn.title = "AI Comment";
+    btn.onmouseenter = () => {
+      btn.style.background = "rgb(35, 35, 37)";
+    };
+    btn.onmouseleave = () => {
+      btn.style.background = "rgb(16, 17, 18)";
+    };
     btn.innerHTML = `
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:7px;"><circle cx="12" cy="12" r="10" fill="white" fill-opacity="0.18"/><path d="M9.5 10.5C9.5 9.11929 10.6193 8 12 8C13.3807 8 14.5 9.11929 14.5 10.5C14.5 11.8807 13.3807 13 12 13C10.6193 13 9.5 11.8807 9.5 10.5Z" fill="white"/><rect x="11" y="14" width="2" height="4" rx="1" fill="white"/></svg>
       <span style="font-weight:500;font-size:12px;color:#fff;">AI Comment</span>
@@ -418,10 +432,12 @@ const { showNotification } = require("../../utils/notification");
     };
 
     // Find the action row: .display-flex.justify-space-between > .display-flex (first child)
-    const justifyRow = commentForm.querySelector('.display-flex.justify-space-between');
+    const justifyRow = commentForm.querySelector(
+      ".display-flex.justify-space-between"
+    );
     if (justifyRow && justifyRow.children.length > 0) {
-      const iconRow = justifyRow.querySelector('.display-flex');
-      if (iconRow && !iconRow.querySelector('.mp-test-comment-btn')) {
+      const iconRow = justifyRow.querySelector(".display-flex");
+      if (iconRow && !iconRow.querySelector(".mp-test-comment-btn")) {
         iconRow.appendChild(btn);
         return;
       }
@@ -434,8 +450,8 @@ const { showNotification } = require("../../utils/notification");
   function extractPostContent(post) {
     // Try common LinkedIn post content selectors
     const contentElement =
-      post.querySelector('.update-components-update-v2__commentary') ||
-      post.querySelector('.update-components-text');
+      post.querySelector(".update-components-update-v2__commentary") ||
+      post.querySelector(".update-components-text");
     if (contentElement) {
       return contentElement.textContent.trim();
     }
@@ -445,23 +461,30 @@ const { showNotification } = require("../../utils/notification");
   // Call API to generate comment (self-contained, similar to generateGPTComment)
   async function generateGPTComment(postContent, fallbackUserPrompt) {
     // Always fetch latest userPrompt and commentLength from storage
-    const storage = await new Promise(resolve => {
-      chrome.storage.local.get(['userPrompt', 'commentLength'], resolve);
+    const storage = await new Promise((resolve) => {
+      chrome.storage.local.get(
+        ["userPrompt", "commentLength", "systemPrompt"],
+        resolve
+      );
     });
-    const userPrompt = (fallbackUserPrompt && fallbackUserPrompt.trim()) || '';
+    const userPrompt = (fallbackUserPrompt && fallbackUserPrompt.trim()) || "";
+    const systemPrompts = storage.systemPrompt || defaultStartPrompt;
     const commentLength = storage.commentLength || 30;
-    const model = 'llama3.1:latest';
-    const finalSystemPrompt = [
-      defaultStartPrompt.trim(),
-      userPrompt,
-      defaultEndPrompt.trim(),
-    ].join("\n");
-    const systemPrompt = finalSystemPrompt.replace("{{MAX_WORDS}}", commentLength);
+    const model = "llama3.1:latest";
+    const finalSystemPrompt = [systemPrompts.trim(), userPrompt].join("\n");
+    const systemPrompt = finalSystemPrompt.replace(
+      "{{MAX_WORDS}}",
+      commentLength
+    );
     const body = JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Generate comment for post: "${postContent}"` },
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Instructions:${userPrompt}
+         Generate comment for post: "${postContent}"`,
+        },
       ],
       options: {
         max_token: MaxTokens[commentLength] || 256,
@@ -471,24 +494,24 @@ const { showNotification } = require("../../utils/notification");
     const serverUrl = `${APIURL}/ai/chat`;
     try {
       const res = await fetch(serverUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body,
       });
       const data = await res.json();
-      if (data.error) return 'Error: ' + (data.error.message || 'API error');
+      if (data.error) return "Error: " + (data.error.message || "API error");
       return data.data.data;
     } catch (e) {
-      return 'Error generating comment.';
+      return "Error generating comment.";
     }
   }
 
   // Main logic: only run if showtest is true
-  chrome.storage.local.get(['showtest'], ({ showtest }) => {
+  chrome.storage.local.get(["showtest"], ({ showtest }) => {
     if (!showtest) return;
     // Wait for DOM ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', run);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", run);
     } else {
       run();
     }
@@ -496,19 +519,19 @@ const { showNotification } = require("../../utils/notification");
 
   function run() {
     // Find all posts (same selector as main extension)
-    const postSelector = '.feed-shared-update-v2';
+    const postSelector = ".feed-shared-update-v2";
     const posts = document.querySelectorAll(postSelector);
-    posts.forEach(post => {
+    posts.forEach((post) => {
       const postContent = extractPostContent(post);
       injectTestCommentButton(post, postContent);
     });
     // Optionally, observe for new posts (infinite scroll)
-    const feed = document.querySelector('div.feed-outlet, main, body');
+    const feed = document.querySelector("div.feed-outlet, main, body");
     if (feed && window.MutationObserver) {
       const observer = new MutationObserver(() => {
         const posts = document.querySelectorAll(postSelector);
-        posts.forEach(post => {
-          if (!post.querySelector('.mp-test-comment-btn')) {
+        posts.forEach((post) => {
+          if (!post.querySelector(".mp-test-comment-btn")) {
             const postContent = extractPostContent(post);
             injectTestCommentButton(post, postContent);
           }
@@ -517,4 +540,4 @@ const { showNotification } = require("../../utils/notification");
       observer.observe(feed, { childList: true, subtree: true });
     }
   }
-})(); 
+})();

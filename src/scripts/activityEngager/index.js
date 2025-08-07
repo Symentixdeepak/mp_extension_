@@ -15,6 +15,7 @@ const {
   CommentLengthToWordsLength,
   MaxTokens,
   APIURL,
+  defaultStartPrompt,
 } = require("../../utils/constant");
 const {
   simulateMouseClick,
@@ -39,6 +40,7 @@ let likePostEnabled = DEFAULT_SETTINGS.likePostEnabled;
 let commentLength = DEFAULT_SETTINGS.commentLength;
 let SELECTORS = null;
 let userPrompt = DEFAULT_SETTINGS.userPrompt;
+let systemPrompt = defaultStartPrompt;
 let currentActivityId = null;
 let authToken = null;
 let businessId = null;
@@ -76,6 +78,7 @@ async function initialize() {
       "likePostEnabled",
       "commentLength",
       "userPrompt",
+      "systemPrompt",
       "engagement_current_customer_activity",
       "engagement_token",
       "engagement_business_id",
@@ -115,6 +118,8 @@ async function initialize() {
     commentLength = data.commentLength || DEFAULT_SETTINGS.commentLength;
     userPrompt =
       data?.engagement_prompt || data.userPrompt || DEFAULT_SETTINGS.userPrompt;
+    systemPrompt = data.systemPrompt || defaultStartPrompt;
+
     currentActivityId = data.engagement_current_customer_activity || null;
     segmentId = data.engagement_segment_id || null;
     authToken = data.engagement_token || null;
@@ -438,14 +443,17 @@ async function generateGPTComment(postContent, topComments) {
   try {
     const max_words = commentLength;
     const prompt = `Generate comment for post: "${postContent}"`;
-    const systemPrompt = userPrompt.replace("{{MAX_WORDS}}", max_words);
+    const finalSystemPrompt = [systemPrompt.trim(), userPrompt.trim()].join(
+      "\n"
+    );
+    const systemPrompts = finalSystemPrompt.replace("{{MAX_WORDS}}", max_words);
 
     const body = JSON.stringify({
       model: "llama3.1:latest",
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: systemPrompts,
           // content: `You are a professional comment generator. Generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: Match the topic and tone without deviation; be supportive, non-aggressive, and use direct address ('you'/'your'); keep the comment within ${max_words} words; reference specific details from the post/comments; do not ask questions; synthesize ideas uniquely without copying top comments; if unable to generate properly, return NULL. Output only the comment text or NULL—no explanations, markdown, or extra text.  Example Output: Good to hear you’ve learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
           // `You are a professional comment generator. You need to generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: 1. Relevance: Match the topic and tone of the post and comments. Do not deviate. 2. Tone: Be supportive, non-aggressive, and avoid argumentative/questioning language. Always use direct address ('you/your'). 3. Conciseness: ${sentanceLength} sentences max. Avoid generic phrases (e.g., 'Great post!') 4. Specificity: Reference details from the post/comments (e.g., skills, achievements, goals). 5. No Questions: Do not ask for clarifications, opinions, or further details. 6. Originality: Do not repeat top comments verbatim. Synthesize ideas uniquely. 7. Output: Return only the comment text. No explanations, markdown, or extra text. Example Output: Good to hear you’ve learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
         },

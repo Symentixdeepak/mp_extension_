@@ -60,10 +60,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": [
-        "https://www.linkedin.com/search/results/content/*",
-        "https://www.linkedin.com/feed/update/*"
-      ],
+      "matches": ["https://www.linkedin.com/*"],
       "js": ["js/topicButton.js"],
       "css": ["styles/styles.css"],
       "run_at": "document_idle"

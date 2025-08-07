@@ -15,8 +15,9 @@ const {
   CommentLengthToWordsLength,
   MaxTokens,
   APIURL,
-  defaultStartPrompt,
+
   defaultEndPrompt,
+  defaultStartPrompt,
 } = require("../../utils/constant");
 const {
   simulateMouseClick,
@@ -41,6 +42,7 @@ let likePostEnabled = DEFAULT_SETTINGS.likePostEnabled;
 let commentLength = DEFAULT_SETTINGS.commentLength;
 let SELECTORS = null;
 let userPrompt = DEFAULT_SETTINGS.userPrompt;
+let systemPrompt = defaultStartPrompt;
 
 // === Delay Management Utilities ===
 const NEXT_ENGAGEMENT_KEY = "mp_next_engagement_time";
@@ -114,6 +116,7 @@ async function initialize() {
       "likePostEnabled",
       "commentLength",
       "userPrompt",
+      "systemPrompt",
     ]);
 
     console.log("refres setting starts...");
@@ -147,6 +150,7 @@ async function initialize() {
     likePostEnabled = data.likePostEnabled !== false;
     commentLength = data.commentLength || DEFAULT_SETTINGS.commentLength;
     userPrompt = data.userPrompt || DEFAULT_SETTINGS.userPrompt;
+    systemPrompt = data.systemPrompt || defaultStartPrompt;
     console.log("refresh setting finished...", data);
   }
 
@@ -491,19 +495,17 @@ async function generateGPTComment(postContent, topComments) {
   try {
     const max_words = commentLength;
     const prompt = `Generate comment for post: "${postContent}"`;
-    const finalSystemPrompt = [
-      defaultStartPrompt.trim(),
-      userPrompt.trim(),
-      defaultEndPrompt.trim(),
-    ].join("\n");
-    const systemPrompt = finalSystemPrompt.replace("{{MAX_WORDS}}", max_words);
+    const finalSystemPrompt = [systemPrompt.trim(), userPrompt.trim()].join(
+      "\n"
+    );
+    const systemPrompts = finalSystemPrompt.replace("{{MAX_WORDS}}", max_words);
 
     const body = JSON.stringify({
       model: "llama3.1:latest",
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: systemPrompts,
           // content: `You are a professional comment generator. Generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: Match the topic and tone without deviation; be supportive, non-aggressive, and use direct address ('you'/'your'); keep the comment within ${max_words} words; reference specific details from the post/comments; do not ask questions; synthesize ideas uniquely without copying top comments; if unable to generate properly, return NULL. Output only the comment text or NULL—no explanations, markdown, or extra text.  Example Output: Good to hear you've learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
           // `You are a professional comment generator. You need to generate a concise, professional, and personalized comment based on the user's post and its top comments. Follow these rules: 1. Relevance: Match the topic and tone of the post and comments. Do not deviate. 2. Tone: Be supportive, non-aggressive, and avoid argumentative/questioning language. Always use direct address ('you/your'). 3. Conciseness: ${sentanceLength} sentences max. Avoid generic phrases (e.g., 'Great post!') 4. Specificity: Reference details from the post/comments (e.g., skills, achievements, goals). 5. No Questions: Do not ask for clarifications, opinions, or further details. 6. Originality: Do not repeat top comments verbatim. Synthesize ideas uniquely. 7. Output: Return only the comment text. No explanations, markdown, or extra text. Example Output: Good to hear you've learned the MERN stack. Its simplicity and demand make it a great choice—best of luck with the interviews!`,
         },
@@ -933,26 +935,63 @@ if (document.readyState === "loading") {
 (async function () {
   let hasChecked = false;
 
-  // Helper to get anchor href inside .profile-card-member-details
-  function getProfileAnchorHref() {
-    const div = document.querySelector(".profile-card-member-details");
-    if (!div) return null;
-    const anchor = div.querySelector("a[href]");
-    return anchor ? anchor.href : null;
+  // Function to extract LinkedIn vanity name from DOM
+  function extractLinkedInVanityName() {
+    // Quick win: URL extraction
+    const urlMatch = window.location.href.match(/\/in\/([^\/\?#]+)/);
+    if (urlMatch) return urlMatch[1];
+    
+    // Search code tags with profile data
+    const codeTags = document.querySelectorAll('code');
+    
+    for (let codeTag of codeTags) {
+      const content = codeTag.textContent;
+      
+      // Skip empty or small content
+      if (!content || content.length < 50) continue;
+      
+      // Look for LinkedIn profile indicators
+      if (content.includes('publicIdentifier') && 
+          (content.includes('MiniProfile') || content.includes('fs_miniProfile'))) {
+        
+        try {
+          const data = JSON.parse(content);
+          
+          // Method A: Check included array
+          if (data.included && Array.isArray(data.included)) {
+            for (let item of data.included) {
+              if (item.publicIdentifier && 
+                  item.$type && 
+                  item.$type.includes('MiniProfile')) {
+                return item.publicIdentifier;
+              }
+            }
+          }
+          
+          // Method B: Direct property check
+          if (data.publicIdentifier) {
+            return data.publicIdentifier;
+          }
+          
+        } catch (parseError) {
+          // Fallback: regex extraction
+          const match = content.match(/"publicIdentifier":\s*"([^"]+)"/);
+          if (match) return match[1];
+        }
+      }
+    }
+    
+    return null;
   }
 
   // Check and update user_info only if not already stored
   function checkAndUpdateUserInfo() {
     if (hasChecked) return; // Don't check again if already done
-    
-    const href = getProfileAnchorHref();
-    if (!href) return;
 
-    // Updated regex to capture alphanumeric IDs (including letters and numbers)
-    const match = href.match(/\/in\/[^\/]+-(\w+)\/?/);
-    if (!match || !match[1]) return;
+    const vanityName = extractLinkedInVanityName();
+    if (!vanityName) return;
 
-    const profileId = match[1]; // Changed variable name for clarity
+    console.log("🔍 Found vanity name:", vanityName);
 
     chrome.storage.local.get(["user_info"], (result) => {
       if (chrome.runtime.lastError) {
@@ -960,20 +999,28 @@ if (document.readyState === "loading") {
         return;
       }
 
-      // If user_info doesn't exist OR it doesn't match current profileId, save/update it
-      if (!result.user_info || result.user_info !== profileId) {
-        chrome.storage.local.set({ user_info: profileId }, () => {
+      // If user_info doesn't exist OR it doesn't match current vanityName, save/update it
+      if (!result.user_info || result.user_info !== vanityName) {
+        chrome.storage.local.set({ user_info: vanityName }, () => {
           if (!chrome.runtime.lastError) {
             if (!result.user_info) {
-              console.log("✅ user_info saved:", profileId);
+              console.log("✅ user_info saved:", vanityName);
             } else {
-              console.log("🔄 user_info updated from", result.user_info, "to", profileId);
+              console.log(
+                "🔄 user_info updated from",
+                result.user_info,
+                "to",
+                vanityName
+              );
             }
             hasChecked = true; // Mark as checked so we don't do it again
           }
         });
       } else {
-        console.log("ℹ️ user_info already matches current profile:", result.user_info);
+        console.log(
+          "ℹ️ user_info already matches current profile:",
+          result.user_info
+        );
         hasChecked = true; // Mark as checked
       }
     });
@@ -991,8 +1038,11 @@ if (document.readyState === "loading") {
     }
   });
 
-  observer.observe(document.body, { 
-    childList: true, 
-    subtree: true 
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
   });
 })();
+
+
+

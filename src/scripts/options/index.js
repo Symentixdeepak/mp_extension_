@@ -1,7 +1,14 @@
 // In popup.js, options.js etc.
 require("../../styles/tailwind.css");
-const { DEFAULT_SETTINGS, ONE_MINUTE } = require("../../utils/constant");
-const { publishEvent, refreshLinkedInFeedAfterDelay } = require("../../utils/utils");
+const {
+  DEFAULT_SETTINGS,
+  ONE_MINUTE,
+  defaultStartPrompt,
+} = require("../../utils/constant");
+const {
+  publishEvent,
+  refreshLinkedInFeedAfterDelay,
+} = require("../../utils/utils");
 
 // DOM Elements
 const form = document.getElementById("options-form");
@@ -18,13 +25,14 @@ const statusMessage = document.getElementById("status-message");
 const likePostCheckbox = document.getElementById("likePostEnabled");
 const commentLengthInput = document.getElementById("commentLength");
 const userPromptInput = document.getElementById("promptInput");
+const systemPromptInput = document.getElementById("systemPromptInput");
 const feedCommenterActiveCheckbox = document.getElementById(
   "feedCommenterActive"
 );
-const IsTopicListEnable = document.getElementById(
-  "topicCommenterActive"
+const IsTopicListEnable = document.getElementById("topicCommenterActive");
+const enableAICommentOnPostCheckbox = document.getElementById(
+  "enableAICommentOnPost"
 );
-const enableAICommentOnPostCheckbox = document.getElementById("enableAICommentOnPost");
 
 // Load saved settings
 function loadSettings() {
@@ -39,6 +47,7 @@ function loadSettings() {
       "likePostEnabled",
       "commentLength",
       "userPrompt",
+      "systemPrompt",
       "feed_commenter_active",
       "topic_commenter_active",
       "showtest",
@@ -71,7 +80,7 @@ function loadSettings() {
         items.feed_commenter_active !== undefined
           ? items.feed_commenter_active
           : DEFAULT_SETTINGS.isFeedCommenterActive;
-                IsTopicListEnable.checked =
+      IsTopicListEnable.checked =
         items.topic_commenter_active !== undefined
           ? items.topic_commenter_active
           : DEFAULT_SETTINGS.isTopicCommenterActive;
@@ -81,6 +90,15 @@ function loadSettings() {
           .map((line) => line.trimStart())
           .join("\n") ||
         DEFAULT_SETTINGS.userPrompt
+          ?.split("\n")
+          .map((line) => line.trimStart())
+          .join("\n");
+      systemPromptInput.value =
+        items.systemPrompt
+          ?.split("\n")
+          .map((line) => line.trimStart())
+          .join("\n") ||
+        defaultStartPrompt
           ?.split("\n")
           .map((line) => line.trimStart())
           .join("\n");
@@ -135,14 +153,17 @@ function saveSettings() {
       maxDelay: maxDelay * ONE_MINUTE,
       commentLength: commentLengthInput.value,
       userPrompt: userPromptInput.value,
+      systemPrompt: systemPromptInput.value,
       feed_commenter_active: feedCommenterActiveCheckbox.checked,
       topic_commenter_active: IsTopicListEnable.checked,
-      showtest: enableAICommentOnPostCheckbox ? enableAICommentOnPostCheckbox.checked : true,
+      showtest: enableAICommentOnPostCheckbox
+        ? enableAICommentOnPostCheckbox.checked
+        : true,
     },
     function () {
       showStatus("Settings saved successfully!", "success");
       publishEvent();
-      refreshLinkedInFeedAfterDelay()
+      refreshLinkedInFeedAfterDelay();
     }
   );
 
@@ -167,9 +188,14 @@ function resetSettings() {
     ?.split("\n")
     .map((line) => line.trimStart())
     .join("\n");
+  systemPromptInput.value = defaultStartPrompt
+    ?.split("\n")
+    .map((line) => line.trimStart())
+    .join("\n");
   feedCommenterActiveCheckbox.checked = DEFAULT_SETTINGS.isFeedCommenterActive;
   IsTopicListEnable.checked = DEFAULT_SETTINGS.isTopicCommenterActive;
-  if (enableAICommentOnPostCheckbox) enableAICommentOnPostCheckbox.checked = true;
+  if (enableAICommentOnPostCheckbox)
+    enableAICommentOnPostCheckbox.checked = true;
 
   // apiKeyContainer.style.display = useGPTCheckbox.checked ? "block" : "none";
 

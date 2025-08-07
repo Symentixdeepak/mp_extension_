@@ -4,6 +4,7 @@ const {
   ENGAGEMENT_KEEP_ALIVE_ALARM_NAME,
   APIURL,
   WEBURL,
+  defaultStartPrompt,
 } = require("../../utils/constant");
 const {
   fetchTopicList,
@@ -41,6 +42,7 @@ chrome.runtime.onInstalled.addListener(function () {
       "lastResetDate",
       "likePostEnabled",
       "userPrompt",
+      "systemPrompt",
     ],
     function (data) {
       chrome.storage.local.set(
@@ -65,6 +67,7 @@ chrome.runtime.onInstalled.addListener(function () {
           maxDelay: data.maxDelay || DEFAULT_SETTINGS.maxDelay,
           useGPT: data.useGPT || DEFAULT_SETTINGS.useGPT,
           apiKey: data.apiKey || DEFAULT_SETTINGS.apiKey,
+          systemPrompt: data.systemPrompt || defaultStartPrompt,
           lastResetDate: data.lastResetDate || new Date().toDateString(),
           likePostEnabled:
             data.likePostEnabled || DEFAULT_SETTINGS.likePostEnabled,
@@ -608,7 +611,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 url,
                 lkdn_profile_id: sessionId,
                 prompt: promptValue,
-                list_id: contactTypeId,
+                segment_id: contactTypeId,
                 goal_prompt: businessGoal || "",
               }),
             });
@@ -777,7 +780,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               contactTypesData.data.rows.length > 0
             ) {
               const contactType = contactTypesData.data.rows.find(
-                (type) => type.name === "Prospects"
+                (type) => type.label === "Prospects"
               );
               lifecycleStageId = contactType?._id;
               console.log("Using lifecycle stage ID:", lifecycleStageId);
@@ -808,7 +811,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!response.ok) throw new Error(`API error: ${response.status}`);
 
             const contactData = await response.json();
-            const createdContactId = contactData?.data?.data?._id;
+            console.log("Contact creation response:", contactData); 
+            const createdContactId = contactData?.data?._id;
 
             if (!createdContactId) {
               throw new Error("Failed to get created contact ID from response");

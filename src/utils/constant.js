@@ -24,9 +24,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const defaultStartPrompt = `You are a professional comment generator. You will generate a concise, professional, and personalized comment based on the user's post. 
-Follow these rules:`;
-
-const defaultEndPrompt = `
+Follow these rules:
 reference specific details from the post;
 if unable to generate comment, return NULL. 
 Output only the comment text or NULL.
@@ -34,13 +32,14 @@ If the post contains profanity, hate speech, slurs, or violates content policies
 Output should not contain any explanations, markdown, or extra text.  
 Failed comment example output: NULL`;
 
+const defaultEndPrompt = ``;
 const topicSystemPrompt = `You are an AI assistant that helps determine if a LinkedIn post is relevant to a user's business goals.
 Instructions:
 - Read the user's business goal.
 - Read the LinkedIn post content.
 - Decide if the post is a good opportunity based on the goal.
 - mark it relevant only if it is very highly relevant.
-- Respond ONLY with one of the following and also explain why:
+- Respond ONLY with one of the following:
   - Relevant
   - Not Relevant`;
 
@@ -55,8 +54,8 @@ const MaxTokens = {
   long: 250,
 };
 
-const APIURL = `https://dev.manageplus.io/admin/api`;
-const WEBURL = `https://dev.manageplus.io`;
+const APIURL = `https://app.manageplus.io/admin/api`;
+const WEBURL = `https://app.manageplus.io`;
 
 module.exports = {
   DEFAULT_SETTINGS,

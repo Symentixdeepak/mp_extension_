@@ -282,18 +282,27 @@ function publishEvent(payload = { action: "updateActiveState" }) {
   });
 }
 
-function refreshLinkedInFeedAfterDelay() {
-  // Find LinkedIn tab(s)
-  chrome.tabs.query({ url: "*://*.linkedin.com/*" }, function (tabs) {
-    for (let tab of tabs) {
-      if (tab.url.includes("linkedin.com")) {
-        // Wait for 5 seconds, then update the tab to linkedin.com/feed
-        setTimeout(() => {
-          chrome.tabs.update(tab.id, { url: "https://linkedin.com/feed" });
-        }, 5000);
-        break; // Refresh only the first matching tab
+async function refreshLinkedInFeedAfterDelay() {
+  chrome.storage.local.get(["topic_commenter_active"], async function (result) {
+    const isActive = result?.topic_commenter_active === true;
+
+    // Get LinkedIn tabs
+    chrome.tabs.query({ url: "*://*.linkedin.com/*" }, async function (tabs) {
+      for (let tab of tabs) {
+        if (tab.url.includes("linkedin.com")) {
+          const urlToOpen = isActive
+            ? await getRandomTopicUrl()
+            : "https://linkedin.com/feed";
+
+          // Delay 5 seconds before refreshing
+          setTimeout(() => {
+            chrome.tabs.update(tab.id, { url: urlToOpen });
+          }, 5000);
+
+          break; // Refresh only the first matching tab
+        }
       }
-    }
+    });
   });
 }
 
@@ -521,19 +530,23 @@ function extractLinkedInProfile(post) {
 // Extract avatar URL
 function extractAvatarUrl(post) {
   try {
-    const avatarLink = post.querySelector(
-      ".update-components-actor__image.relative"
-    );
-    if (!avatarLink || !avatarLink.href) {
-      console.log("Avatar link not found");
-      return "/";
+    const actorMeta = post.querySelector(".update-components-actor__avatar");
+    if (!actorMeta) {
+      console.log("Avatar container not found");
+      return null;
     }
 
-    console.log("Avatar URL:", avatarLink.href);
-    return avatarLink.href;
+    const img = actorMeta.querySelector("img");
+    if (!img || !img.src) {
+      console.log("Avatar image not found or no src");
+      return null;
+    }
+
+    console.log("Avatar URL:", img.src);
+    return img.src;
   } catch (error) {
     console.error("Error extracting avatar URL:", error);
-    return "/";
+    return null;
   }
 }
 
@@ -687,7 +700,6 @@ module.exports = {
 const { APIURL } = require("./constant");
 
 // Add topic to list API
-
 
 // Fetch topic list API
 async function fetchTopicList(sessionId) {

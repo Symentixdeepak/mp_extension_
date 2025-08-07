@@ -431,6 +431,9 @@ if (!window.historyManagerInitialized) {
       this.currentBusinessId = null;
       this.topicsContainer = document.getElementById("topic-list-content");
       this.workspaceSelect = document.getElementById("topicTabBoardSelect");
+      this.topicTabBoardSelectLabel = document.getElementById(
+        "topicTabBoardSelectLabel"
+      );
       this.titleElement = document.getElementById("topic-list-title");
       this.addTopicBtn = null;
       this.addTopicPopover = null;
@@ -567,18 +570,15 @@ if (!window.historyManagerInitialized) {
           }
           // Call API
           try {
-            const response = await fetch(
-              `${APIURL}/linkedin-topic`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${this.token}`,
-                  "b-id": selectedBid,
-                },
-                body: JSON.stringify(payload),
-              }
-            );
+            const response = await fetch(`${APIURL}/linkedin-topic`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.token}`,
+                "b-id": selectedBid,
+              },
+              body: JSON.stringify(payload),
+            });
             if (!response.ok) throw new Error("Failed to add topic");
             showNotification("Topic added successfully!", "success");
             this.addTopicPopover.remove();
@@ -602,6 +602,20 @@ if (!window.historyManagerInitialized) {
       try {
         const storage = await chrome.storage.local.get(["user_info"]);
         const userInfo = storage.user_info;
+        if (!this.token) {
+          this.addTopicBtn.style.display = "none"; // Hide button until token is fetched
+          this.workspaceSelect.style.display = "none"; // Hide select until token is fetched
+          this.topicTabBoardSelectLabel.style.display = "none"; // Hide label until token is fetched
+          renderLoginRequiredUI(
+            this.topicsContainer,
+            "Login Required",
+            "To view your engagement activity, please login to your ManagePlus account.",
+            "Login to ManagePlus"
+          );
+        }
+        this.addTopicBtn.style.display = "block"; // Hide button until token is fetched
+        this.workspaceSelect.style.display = "block"; // Hide select until token is fetched
+        this.topicTabBoardSelectLabel.style.display = "block"; // Hide label until token is fetched
         if (!userInfo) {
           this.topicsContainer.innerHTML = `<p class='text-red-500'>Session ID not found. Please login.</p>`;
           return;
@@ -633,9 +647,7 @@ if (!window.historyManagerInitialized) {
         } else {
           this.topicsContainer.innerHTML = `<p class='text-gray-500'>No workspaces found.</p>`;
         }
-      } catch (err) {
-        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading workspaces.</p>`;
-      }
+      } catch (err) {}
     }
 
     populateBoardsSelect(boards) {
@@ -661,7 +673,9 @@ if (!window.historyManagerInitialized) {
       try {
         const url = `${APIURL}/linkedin-topic/list?lkdn_profile_id=${encodeURIComponent(
           this.sessionId
-        )}&rows_per_page=100&page_no=1&order_by=desc&business_id=${this.currentBusinessId}`;
+        )}&rows_per_page=100&page_no=1&order_by=desc&business_id=${
+          this.currentBusinessId
+        }`;
         const response = await fetch(url, {
           headers: {
             "b-id": this.currentBusinessId,
