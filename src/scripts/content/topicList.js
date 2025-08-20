@@ -15,6 +15,12 @@ const {
   updateLocalStorageObject,
   getFromChromeStorage,
   setToChromeStorage,
+  getSecChUaHeader,
+  getSecChUaMobile,
+  getSecChUaPlatform,
+  getXLiLang,
+  getAcceptLanguage,
+  getXLiTrackHeader,
 } = require("../../utils/utils");
 const { showNotification } = require("../../utils/notification");
 const {
@@ -37,6 +43,7 @@ let extensionActive = DEFAULT_SETTINGS.active;
 let dailyLimit = DEFAULT_SETTINGS.dailyLimit;
 let commentsPosted = 0;
 let postsLiked = 0;
+let connectionSent = 0; // Track connections sent
 let postsScanned = 0;
 let autoPostEnabled = DEFAULT_SETTINGS.autoPostEnabled;
 let minDelay = DEFAULT_SETTINGS.minDelay;
@@ -194,12 +201,22 @@ async function isCurrentPageManagedTopic() {
 
             if (isManaged && managedTopic) {
               // Update local storage with the topic ID
-              updateLocalStorageObject("topic_eng_data", {
+              const topicDataToSave = {
                 topic_id: managedTopic._id,
                 goal_prompt: managedTopic.goal_prompt,
                 list_id: managedTopic.segment_id,
                 business_id: managedTopic.business_id,
-              });
+                profile_prompt: managedTopic.profile_prompt,
+              };
+
+              // ✅ Only add engagement_types if it exists and is not null/undefined
+              if (managedTopic.engagement_types) {
+                topicDataToSave.engagement_types =
+                  managedTopic.engagement_types;
+              }
+
+              updateLocalStorageObject("topic_eng_data", topicDataToSave);
+
               // Instead of updateLocalStorageObject calls, use chrome.storage.local.set
               chrome.storage.local.set(
                 {
@@ -312,6 +329,7 @@ async function initialize() {
       "apiKey",
       "useGPT",
       "lastResetDate",
+      "connectionSent",
       "likePostEnabled",
       "commentLength",
       "userPrompt",
@@ -328,16 +346,19 @@ async function initialize() {
       chrome.storage.local.set({
         commentsPosted: 0,
         postsScanned: 0,
+        connectionSent: 0,
         postsLiked: 0,
         lastResetDate: today,
       });
       commentsPosted = 0;
       postsScanned = 0;
       postsLiked = 0;
+      connectionSent = 0; // Reset connections sent
     } else {
       commentsPosted = data.commentsPosted || 0;
       postsScanned = data.postsScanned || 0;
       postsLiked = data.postsLiked || 0;
+      connectionSent = data.connectionSent || 0; // Get connections sent
     }
 
     dailyLimit = data.dailyLimit || DEFAULT_SETTINGS.dailyLimit;
@@ -419,6 +440,12 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
   const keywords = getKeywordsFromUrl();
   const origin = getOriginFromUrl();
   const dynamicQueryParams = buildDynamicQueryParams();
+  const secChUaHeader = await getSecChUaHeader();
+  const secChUaMobile = getSecChUaMobile();
+  const secChUaPlatform = getSecChUaPlatform();
+  const xLiLang = getXLiLang();
+  const acceptLanguage = getAcceptLanguage();
+  const xLiTrackHeader = getXLiTrackHeader();
 
   const variablesObj = {
     start,
@@ -451,9 +478,21 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
 
   const headers = {
     accept: "application/vnd.linkedin.normalized+json+2.1",
-    "accept-language": "en-US,en;q=0.9",
+    "accept-language": acceptLanguage,
+
     "csrf-token": await getCsrfToken(),
-    "x-li-lang": "en_US",
+    priority: "u=1, i",
+    "sec-ch-prefers-color-scheme": "dark",
+    "sec-ch-ua": secChUaHeader,
+    "sec-ch-ua-mobile": secChUaMobile,
+    "sec-ch-ua-platform": secChUaPlatform,
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "x-li-lang": xLiLang,
+    "x-li-pem-metadata": "Voyager - Content SRP=search-results",
+    "x-li-track": xLiTrackHeader,
+
     "x-restli-protocol-version": "2.0.0",
   };
 
@@ -476,49 +515,166 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
 
     const json = await resp.json();
     console.log("Total posts fetched:", json);
-    if (!json?.included?.length) return [];
 
-    // Filter for actual post data (EntityResultViewModel type)
-    const postElements = json?.included?.filter(
-      (el) =>
-        el.$type === "com.linkedin.voyager.dash.search.EntityResultViewModel" &&
-        el.trackingUrn &&
-        el.summary // Has post content
+    // Handle both search results and feed data
+    let extractedPosts = [];
+
+    // Check if it's search results format (has included array)
+    if (json?.included?.length) {
+      // Filter for search result posts (EntityResultViewModel type)
+      const searchPostElements = json.included.filter(
+        (el) =>
+          el.$type ===
+            "com.linkedin.voyager.dash.search.EntityResultViewModel" &&
+          el.trackingUrn &&
+          el.summary // Has post content
+      );
+
+      console.log("Search post elements found:", searchPostElements.length);
+
+      if (searchPostElements.length > 0) {
+        extractedPosts = searchPostElements.map((el) => {
+          // Extract post ID from trackingUrn (urn:li:activity:XXXXXXXXX)
+          const postId = el.trackingUrn.split(":").pop();
+
+          // Extract post content from summary text
+          const content = el.summary?.text || "";
+
+          // Extract actor name from title
+          const actorName = el.title?.text || "";
+
+          // Extract actor profile URL from actorNavigationUrl
+          const actorProfile = el.actorNavigationUrl || "";
+
+          // Build post URL for feed/update page
+          const postUrl = `https://www.linkedin.com/feed/update/urn:li:activity:${postId}`;
+
+          console.log("Extracted search post data:", {
+            postId,
+            content,
+            actorName,
+            actorProfile,
+            postUrl,
+          });
+
+          return {
+            postId,
+            content,
+            actorName,
+            actorProfile,
+            postUrl,
+            type: "search",
+            rawData: el,
+          };
+        });
+      }
+    }
+
+    // Check if it's feed format (direct array of feed updates)
+    const feedData = Array.isArray(json) ? json : json?.included || [];
+    const feedPostElements = feedData.filter(
+      (el) => el.$type === "com.linkedin.voyager.dash.feed.Update"
     );
-    console.log("Filtered post elements:", postElements);
-    return postElements.map((el) => {
-      // Extract post ID from trackingUrn (urn:li:activity:XXXXXXXXX)
-      const postId = el.trackingUrn.split(":").pop();
 
-      // Extract post content from summary text
-      const content = el.summary?.text || "";
+    console.log("Feed post elements found:", feedPostElements.length);
 
-      // Extract actor name from title
-      const actorName = el.title?.text || "";
+    if (feedPostElements.length > 0) {
+      const feedPosts = feedPostElements.map((el) => {
+        // Extract post ID from backend URN or share URN
+        const backendUrn = el.metadata?.backendUrn || "";
+        const shareUrn = el.metadata?.shareUrn || "";
+        const postId = backendUrn.split(":").pop() || shareUrn.split(":").pop();
 
-      // Extract actor profile URL from actorNavigationUrl
-      const actorProfile = el.actorNavigationUrl || "";
+        // Extract post content from commentary
+        const content = el.commentary?.text?.text || "";
 
-      // Build post URL for feed/update page
-      const postUrl = `https://www.linkedin.com/feed/update/urn:li:activity:${postId}`;
+        // Extract actor name
+        const actorName = el.actor?.name?.text || "";
 
-      console.log("Extracted post data:", {
-        postId,
-        content,
-        actorName,
-        actorProfile,
-        postUrl,
+        // Extract actor profile URL
+        const actorProfile = el.actor?.navigationContext?.actionTarget || "";
+
+        // Build post URL
+        const postUrl = shareUrn
+          ? `https://www.linkedin.com/feed/update/${shareUrn}`
+          : `https://www.linkedin.com/feed/update/urn:li:activity:${postId}`;
+
+        // Extract hashtags from text attributes
+        const hashtags =
+          el.commentary?.text?.attributesV2
+            ?.filter((attr) => attr.detailData?.hashtag)
+            .map((attr) => {
+              const hashtagUrn = attr.detailData.hashtag;
+              // Extract hashtag name from URN like "urn:li:fsd_hashtag:(work,urn:li:activity:...)"
+              const match = hashtagUrn.match(/\(([^,]+),/);
+              return match ? match[1] : null;
+            })
+            .filter(Boolean) || [];
+
+        // Extract timestamp
+        const timestamp = el.actor?.subDescription?.text || "";
+
+        // Get social activity counts
+        const getSocialCounts = () => {
+          // Find corresponding social activity counts
+          const socialCountsUrn = shareUrn || `urn:li:ugcPost:${postId}`;
+          const socialCounts = feedData.find(
+            (item) =>
+              item.$type ===
+                "com.linkedin.voyager.dash.feed.SocialActivityCounts" &&
+              item.urn === socialCountsUrn
+          );
+
+          return {
+            likes: socialCounts?.numLikes || 0,
+            comments: socialCounts?.numComments || 0,
+            shares: socialCounts?.numShares || 0,
+            reactions: socialCounts?.reactionTypeCounts || [],
+          };
+        };
+
+        console.log("Extracted feed post data:", {
+          postId,
+          content: content.substring(0, 100) + "...",
+          actorName,
+          hashtags,
+          socialCounts: getSocialCounts(),
+        });
+
+        return {
+          postId,
+          content,
+          actorName,
+          actorProfile,
+          postUrl,
+          hashtags,
+          timestamp,
+          socialCounts: getSocialCounts(),
+          shareUrn,
+          backendUrn,
+          type: "feed",
+          rawData: el,
+        };
       });
 
-      return {
-        postId,
-        content,
-        actorName,
-        actorProfile,
-        postUrl,
-        rawData: el,
-      };
-    });
+      extractedPosts = extractedPosts.concat(feedPosts);
+    }
+
+    console.log("Total valid posts found:", extractedPosts.length);
+
+    if (extractedPosts.length === 0) {
+      console.log("No posts found. Data structure:", {
+        isArray: Array.isArray(json),
+        hasIncluded: !!json?.included,
+        includedLength: json?.included?.length || 0,
+        directArrayLength: Array.isArray(json) ? json.length : 0,
+        sampleTypes: Array.isArray(json)
+          ? json.slice(0, 5).map((item) => item.$type)
+          : json?.included?.slice(0, 5).map((item) => item.$type) || [],
+      });
+    }
+
+    return extractedPosts;
   } catch (error) {
     console.log("Error fetching posts from LinkedIn API:", error);
     return [];
@@ -660,99 +816,64 @@ async function createContactInBackground(contactData) {
 // Scan for celebration posts
 // Scan for celebration posts
 async function scanPosts() {
-  // Select all posts on the feed
   const postContainers = document.querySelectorAll(SELECTORS.postList[0]);
-  if (postContainers?.length === 0) {
-    showNotification("No posts found in this page.", "warning");
+  if (!postContainers?.length) {
+    showNotification("No posts found on this page.", "warning");
     return;
   }
 
   postsScanned += postContainers.length;
   updateStats();
-
-  let engagedPosts = 0;
-  let shouldRefresh = true;
   isProcessing = true;
 
   for (const post of postContainers) {
     const initialUrlForPost = window.location.href;
-    let loadingNotification;
 
     try {
       const postId = getPostId(post);
-      if (!postId) continue;
-
-      if (lastProcessedPosts.has(postId)) {
-        continue;
-      }
+      if (!postId || lastProcessedPosts.has(postId)) continue;
       lastProcessedPosts.add(postId);
-
-      // Mark post as processed (optional)
       post.setAttribute("data-auto-commenter-processed", "true");
 
-      const commentButton =
-        post.querySelector(SELECTORS.commentButton[0]) ||
-        post.querySelector(SELECTORS.commentButton[1]);
-
-      if (commentButton?.hasAttribute("disabled")) continue;
-
-      const isPromoted = checkPromotedPosts(post);
-      if (isPromoted) continue;
+      if (checkPromotedPosts(post)) continue;
 
       const postContent = extractPostContent(post);
+      if (window.location.href !== initialUrlForPost) break;
 
-      if (window.location.href !== initialUrlForPost) {
-        console.log(
-          `URL changed before starting generation for post ${postId}. Aborting this post.`
-        );
-        shouldRefresh = false;
-        break;
-      }
-
-      loadingNotification = showNotification(
-        "Generating comment... ",
+      const loadingNotification = showNotification(
+        "Generating comment...",
         "loading"
       );
-
       const generatedComment = await generateComment(postContent);
-
-      if (window.location.href !== initialUrlForPost) {
-        console.log(
-          `URL changed during comment generation for post ${postId}. Aborting.`
-        );
-        if (loadingNotification) loadingNotification.closeNotification();
-        break;
-      }
-
       if (loadingNotification) loadingNotification.closeNotification();
 
-      // Determine if comment is valid
-      let shouldPostComment = true;
-      if (!generatedComment || generatedComment.includes("NULL")) {
+      let shouldPostComment = !!(
+        generatedComment && !generatedComment.includes("NULL")
+      );
+      if (!shouldPostComment) {
         showNotification(
-          "Failed to generate comment, but continuing with engagement.",
+          "Failed to generate comment, skipping comment step.",
           "warning"
         );
-        shouldPostComment = false;
       } else {
         showNotification("Comment generated!", "success");
       }
 
-      // Extract contact info before engagement
+      const topicEngData = await getFromChromeStorage("topic_eng_data", {});
+
+      // === UPDATED DEFAULT LOGIC ===
+      const engagementTypes = topicEngData?.engagement_types
+        ? topicEngData.engagement_types
+        : { like: true, comment: true, connect: true };
+
+      if (!topicEngData?.list_id) return;
+
+      // Create Contact
       const { firstName, lastName } = extractFirstAndLastName(post);
       const mp_linkedinProfile = extractLinkedInProfile(post);
       const avatarUrl = extractAvatarUrl(post);
 
-      const topicEngData = await getFromChromeStorage("topic_eng_data", {});
-
-      if (!topicEngData?.list_id) {
-        // If no topic engagement data, skip this post or handle as needed
-        return;
-      }
-
-      let contactCreated = false;
       let contactData;
-
       try {
         contactData = await createContactInBackground({
           firstName,
@@ -762,97 +883,78 @@ async function scanPosts() {
           avatar: avatarUrl,
         });
 
-        contactCreated = true;
-        console.log("Contact created successfully:", contactData);
-
         updateLocalStorageObject("topic_eng_data", {
           contact_id: contactData.id || contactData._id,
           business_id: contactData.business_id,
           user_profile_url: mp_linkedinProfile,
           current_post_id: postId,
         });
-      } catch (contactError) {
-        console.log("Failed to create contact:", contactError);
-        showNotification(
-          "Failed to create contact. Redirecting to random topic.",
-          "error"
-        );
-
+      } catch (err) {
+        console.error("Failed to create contact:", err);
         chrome.runtime.sendMessage({
           action: "DELAYED_FEED_REDIRECT",
           minDelay,
           maxDelay,
           url: await getRandomTopicUrl(),
         });
-
-        // Skip this post and continue with others
         continue;
       }
 
-      // Handle Like - always attempt if enabled
-      let likeSuccess = false;
-      if (likePostEnabled) {
+      // LIKE
+      if (engagementTypes.like) {
         try {
           await handleLikePost(post, contactData._id);
-          likeSuccess = true;
-        } catch (likeError) {
-          console.log("Failed to like post:", likeError);
-          likeSuccess = false;
+        } catch (err) {
+          console.error("Like failed:", err);
         }
-      } else {
-        likeSuccess = true; // Consider success if liking disabled
+        await new Promise((res) =>
+          setTimeout(res, getRandomDelay(20000, 25000))
+        );
       }
 
-      // Small delay for natural behavior
-      await new Promise((resolve) =>
-        setTimeout(resolve, getRandomDelay(6000, 12000))
-      );
-
-      // Handle comment posting only if shouldPostComment is true
-      let commentSuccess = false;
-      if (shouldPostComment) {
+      // COMMENT
+      if (engagementTypes.comment && shouldPostComment) {
         try {
-          await postComment(post, generatedComment, contactData.id);
-          commentSuccess = true;
-
           await new Promise((resolve) =>
-            setTimeout(resolve, getRandomDelay(2000, 3000))
+            setTimeout(resolve, getRandomDelay(20000, 30000))
           );
-        } catch (commentError) {
-          console.log("Failed to post comment:", commentError);
-          commentSuccess = false;
+          await postComment(post, generatedComment, contactData.id);
+        } catch (err) {
+          console.error("Comment failed:", err);
         }
-      } else {
-        commentSuccess = false;
+        await new Promise((res) => setTimeout(res, getRandomDelay(2000, 3000)));
       }
 
-      engagedPosts++;
+      // REDIRECT
+      let redirectUrl;
+      if (engagementTypes.connect) {
+        const posterProfileUrl = await extractLinkedInProfile(post);
+        updateLocalStorageObject("topic_eng_data", { posterProfileUrl });
+        redirectUrl = posterProfileUrl;
+      } else {
+        redirectUrl = await getRandomTopicUrl();
+      }
 
-      // Proceed with redirect to a random topic URL (or customize as needed)
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
-        url: await getRandomTopicUrl(),
+        url: redirectUrl,
       });
     } catch (error) {
-      // General error handling
+      console.error("Error processing post:", error);
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
         url: await getRandomTopicUrl(),
       });
-      console.log("Error generating or posting comment:", error);
-      showNotification("Error generating comment", "error");
     }
 
-    // Break after processing one post (you can remove if you want to process all)
-    break;
+    break; // process only one post
   }
 
-  // Update total scanned posts count in storage
-  chrome.storage.local.set({ postsScanned: postsScanned });
+  chrome.storage.local.set({ postsScanned });
 }
 
 // Extract post content
@@ -1036,7 +1138,9 @@ function addCommentButtonListner(post, commentInput, submitButton) {
               action: "MAKE_ACTIVITY_API_CALL",
               payload: {
                 activityId: topicEngData?.last_activity_id, // Use the new function here
-
+                isCreate: topicEngData?.engagement_types
+                  ? !topicEngData.engagement_types.like
+                  : true,
                 businessId: topicEngData?.business_id,
                 engagement_type: "comment", // Assuming only comments for now
                 segmentId: topicEngData.topic_id,
@@ -1268,7 +1372,7 @@ async function engageWithFirstScannedPost() {
     `=== engageWithFirstScannedPost ENTRY === apiPageStart: ${apiPageStart}`
   );
 
-  if (postsLiked >= dailyLimit || commentsPosted >= dailyLimit) {
+  if (postsLiked >= dailyLimit || commentsPosted >= dailyLimit || connectionSent >= dailyLimit) {
     console.log("Daily limit reached, exiting");
     chrome.storage.local.get("limitNotificationShown", function (data) {
       if (!data.limitNotificationShown) {
@@ -1323,7 +1427,8 @@ async function engageWithFirstScannedPost() {
       // Fetch posts with current page start
       console.log(`Fetching posts with apiPageStart: ${apiPageStart}`);
       const posts = await fetchPostsFromAPI(apiPageStart);
-      console.log(`Fetched ${posts.length} posts from API`);
+      console.log({ posts });
+      console.log(`Fetched ${posts.length} ${posts} posts from API`);
       console.log(
         `API Response for start=${apiPageStart}:`,
         posts.map((p) => ({
@@ -1388,7 +1493,7 @@ async function engageWithFirstScannedPost() {
         // Add to processed set immediately to prevent reprocessing
         processedPostIds.add(post.postId);
         await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(5000, 7000)) // Shorter delay for pagination
+          (resolve) => setTimeout(resolve, getRandomDelay(10000, 15000)) // Shorter delay for pagination
         );
         console.log(`Processing new post ${post.postId}`);
         const postUrn = "urn:li:activity:" + post.postId;
@@ -1402,7 +1507,7 @@ async function engageWithFirstScannedPost() {
           continue; // This post is processed (already engaged)
         }
         await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(5000, 7000)) // Shorter delay for pagination
+          (resolve) => setTimeout(resolve, getRandomDelay(10000, 15000)) // Shorter delay for pagination
         );
         // Post is not engaged, check relevance
         console.log(`Checking relevance for post ${post.postId}`);
@@ -1440,7 +1545,7 @@ async function engageWithFirstScannedPost() {
         processedPostIds.clear(); // Clear the processed posts set
         isApiPaginating = false;
         await new Promise((resolve) =>
-          setTimeout(resolve, getRandomDelay(5000, 10000))
+          setTimeout(resolve, getRandomDelay(10000, 15000))
         );
         const postUrn = `urn:li:activity:${foundPostId}`;
         const postUrl = `https://www.linkedin.com/feed/update/${postUrn}`;
@@ -1488,7 +1593,7 @@ async function engageWithFirstScannedPost() {
 
         console.log("About to wait before recursive call...");
         await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(20000, 30000)) // Shorter delay for pagination
+          (resolve) => setTimeout(resolve, getRandomDelay(30000, 40000)) // Shorter delay for pagination
         );
 
         console.log(
@@ -1536,7 +1641,7 @@ async function engageWithFirstScannedPost() {
     console.log("Processing individual post page");
     try {
       await new Promise((resolve) =>
-        setTimeout(resolve, getRandomDelay(1000, 2000))
+        setTimeout(resolve, getRandomDelay(10000, 12000))
       );
       await scanPosts();
       return "POST_PAGE_PROCESSED";

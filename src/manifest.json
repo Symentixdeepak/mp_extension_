@@ -70,6 +70,9 @@
         "https://www.linkedin.com/search/results/content/*",
         "https://www.linkedin.com/feed/update/*"
       ],
+      "exclude_matches": [
+        "https://www.linkedin.com/in/*/recent-activity/all/*"
+      ],
       "js": ["js/topicList.js"],
       "css": ["styles/styles.css"],
       "run_at": "document_idle"
@@ -114,6 +117,16 @@
       ],
       "css": ["styles/styles.css"],
       "js": ["js/importProspect.js"],
+      "run_at": "document_idle"
+    },
+        {
+      "matches": [
+
+       "https://www.linkedin.com/*"
+    
+      ],
+      "css": ["styles/styles.css"],
+      "js": ["js/viewProspect.js"],
       "run_at": "document_idle"
     }
   ],

@@ -7,6 +7,7 @@ const {
   isLinkedInSearchResultsUrl,
   setImportButtonState,
   populateListType,
+  refreshLinkedInFeedAfterDelay,
 } = require("../../utils/utils");
 require("../../styles/tailwind.css");
 
@@ -39,7 +40,6 @@ document.addEventListener("DOMContentLoaded", async function () {
   const statusText = document.getElementById("status-text");
   const pauseResumeBtn = document.getElementById("pause-resume");
 
-  const notLoginContent = document.getElementById("notLoginContent");
   const isSwitchOn = false;
   // ======================
   // Helper UI Functions
@@ -232,52 +232,330 @@ document.addEventListener("DOMContentLoaded", async function () {
     chrome.runtime.openOptionsPage();
   });
 
-  engagementlistBtn.addEventListener("click", function (event) {
-    event.stopPropagation(); // Prevent event from bubbling to linkedinPeopleContent
+  // Topic Engagement Card Click Handler
+  const topicEngagementBtn = document.getElementById("topicEngagementBtn");
+  const topicEngagementStatus = document.getElementById(
+    "topicEngagementStatus"
+  );
+  const backFromTopicStatus = document.getElementById("backFromTopicStatus");
+  const viewTopicList = document.getElementById("viewTopicList");
+  const addNewTopic = document.getElementById("addNewTopic");
+  const activeTopicsCount = document.getElementById("activeTopicsCount");
+  const topicStatusTitle = document.getElementById("topicStatusTitle");
+  const topicStatusDesc = document.getElementById("topicStatusDesc");
 
-    const optionsUrl = chrome.runtime.getURL("options.html");
-    const targetUrlWithFragment = optionsUrl + "#listSegments";
+  if (topicEngagementBtn) {
+    topicEngagementBtn.addEventListener("click", async function () {
+      if (topicEngagementStatus) {
+        const token = await getAuthToken();
+        if (!token) {
+          // Show login required UI
+          topicEngagementStatus.classList.remove("hidden");
+          const contentDiv = topicEngagementStatus.querySelector(".p-4");
+          contentDiv.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-16 h-16 bg-purple-100 rounded-full mx-auto flex items-center justify-center mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">Login Required</h3>
+      <p class="text-sm text-gray-600 mb-6">To use this feature, you need to login to our platform ManagePlus.</p>
+      <button id="topicLoginButton" style="background-color:#101112;" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300">
+        Login to ManagePlus
+      </button>
+    </div>
+  `;
 
-    // Ensure the options page is open and focused, then set the fragment.
-    chrome.runtime.openOptionsPage(() => {
-      if (chrome.runtime.lastError) {
-        console.error(
-          "Error opening options page:",
-          chrome.runtime.lastError.message
-        );
-        // Fallback: try to create the tab directly if openOptionsPage failed
-        chrome.tabs.create({ url: targetUrlWithFragment });
-        return;
-      }
+          // Add event listener after DOM is updated
+          const topicLoginButton =
+            contentDiv.querySelector("#topicLoginButton");
+          topicLoginButton.addEventListener("click", function () {
+            window.open("https://app.manageplus.io", "_blank");
+          });
 
-      // Options page is now open/focused. Find it and update its URL to ensure the fragment.
-      chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
-        if (chrome.runtime.lastError) {
-          console.error(
-            "Error querying for options tab:",
-            chrome.runtime.lastError.message
-          );
-          chrome.tabs.create({ url: targetUrlWithFragment }); // Fallback
           return;
         }
 
-        const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+        // Get topic_commenter_active status and topic list
+        const data = await chrome.storage.local.get(["topic_commenter_active"]);
+        const { fetchTopicList } = require("../../utils/utils");
+        const sessionId = await getAuthToken();
+        const topicList = await fetchTopicList(sessionId);
 
-        if (optionsTab) {
-          // If the tab is found, update its URL to include the fragment and make it active.
-          chrome.tabs.update(optionsTab.id, {
-            url: targetUrlWithFragment,
-            active: true,
-          });
-        } else {
-          console.warn(
-            "Options page not found after openOptionsPage call. Creating new tab as fallback."
-          );
-          chrome.tabs.create({ url: targetUrlWithFragment });
+        // Update active topics count
+        if (
+          activeTopicsCount &&
+          topicList &&
+          topicList.data &&
+          topicList.data.rows
+        ) {
+          activeTopicsCount.textContent = topicList.data.rows.length;
         }
+
+        // Update status based on topic_commenter_active
+        if (data.topic_commenter_active) {
+          topicStatusTitle.textContent = "Topic Engagement Running";
+          topicStatusDesc.textContent =
+            "Your topic engagement is currently active. The system is automatically engaging with your selected topics.";
+        } else {
+          topicStatusTitle.textContent = "Topic Engagement Paused";
+          topicStatusDesc.textContent =
+            "Topic engagement is currently paused. Start engagement or manage your topics to begin the process.";
+        }
+
+        topicEngagementStatus.classList.remove("hidden");
+      }
+    });
+  }
+
+  // Handle View Topic List button click
+  if (viewTopicList) {
+    viewTopicList.addEventListener("click", function () {
+      const optionsUrl = chrome.runtime.getURL("options.html");
+      const targetUrlWithFragment = optionsUrl + "#topic";
+
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.create({ url: targetUrlWithFragment });
+          return;
+        }
+        chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
+          const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+          if (optionsTab) {
+            chrome.tabs.update(optionsTab.id, {
+              url: targetUrlWithFragment,
+              active: true,
+            });
+          } else {
+            chrome.tabs.create({ url: targetUrlWithFragment });
+          }
+        });
       });
     });
-  });
+  }
+
+  // Handle Add New Topic button click
+  if (addNewTopic) {
+    addNewTopic.addEventListener("click", function () {
+      const optionsUrl = chrome.runtime.getURL("options.html");
+      const targetUrlWithFragment = optionsUrl + "#topic-create";
+
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.create({ url: targetUrlWithFragment });
+          return;
+        }
+        chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
+          const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+          if (optionsTab) {
+            chrome.tabs.update(optionsTab.id, {
+              url: targetUrlWithFragment,
+              active: true,
+            });
+          } else {
+            chrome.tabs.create({ url: targetUrlWithFragment });
+          }
+        });
+      });
+    });
+  }
+
+  // Handle back button from topic status
+  if (backFromTopicStatus) {
+    backFromTopicStatus.addEventListener("click", function () {
+      topicEngagementStatus.classList.add("hidden");
+    });
+  }
+
+  // List Engagement Card Click Handler
+  const engagementTabBtn = document.getElementById("engagementTabBtn");
+  const listEngagementStatus = document.getElementById("listEngagementStatus");
+  const backFromListStatus = document.getElementById("backFromListStatus");
+  const viewListActivity = document.getElementById("viewListActivity");
+  const startListEngagement = document.getElementById("startListEngagement");
+  const listStatusTitle = document.getElementById("listStatusTitle");
+  const listStatusDesc = document.getElementById("listStatusDesc");
+
+  if (engagementTabBtn) {
+    engagementTabBtn.addEventListener("click", async function (event) {
+      event.stopPropagation();
+      if (listEngagementStatus) {
+        const token = await getAuthToken();
+        if (!token) {
+          listEngagementStatus.classList.remove("hidden");
+          const contentDiv = listEngagementStatus.querySelector(".p-4");
+          contentDiv.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-16 h-16 bg-indigo-100 rounded-full mx-auto flex items-center justify-center mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">Login Required</h3>
+      <p class="text-sm text-gray-600 mb-6">To use this feature, you need to login to our platform ManagePlus.</p>
+      <button id="loginButton" style="background-color:#101112;" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300">
+        Login to ManagePlus
+      </button>
+    </div>
+  `;
+
+          // Add event listener after DOM is updated
+          const loginButton = contentDiv.querySelector("#loginButton");
+          loginButton.addEventListener("click", function () {
+            window.open("https://app.manageplus.io", "_blank");
+          });
+
+          return;
+        }
+
+        // Get engagement status from storage
+        const statusData = await chrome.storage.local.get([
+          "engagement_status",
+          "prospects_count",
+        ]);
+        const engagementStatus = statusData.engagement_status;
+
+        // Update prospects count
+
+        // Get UI elements
+        const startListEngagement = document.getElementById(
+          "startListEngagement"
+        );
+        const importMoreProspects = document.getElementById(
+          "importMoreProspects"
+        );
+        const listStatusDesc = document.getElementById("listStatusDesc");
+
+        // Add click handler for Import More Prospects button
+        if (importMoreProspects) {
+          importMoreProspects.addEventListener("click", function () {
+            chrome.tabs.query(
+              { pinned: true, currentWindow: true },
+              function (tabs) {
+                const linkedInTab = tabs.find((tab) =>
+                  tab.url.includes("linkedin.com")
+                );
+                const linkedInPeopleURL =
+                  "https://www.linkedin.com/search/results/people/?network=%5B%22F%22%2C%22S%22%5D&origin=FACETED_SEARCH&sid=St%3A";
+
+                if (linkedInTab) {
+                  chrome.tabs.update(linkedInTab.id, {
+                    active: true,
+                    url: linkedInPeopleURL,
+                  });
+                } else {
+                  chrome.tabs.create({
+                    url: linkedInPeopleURL,
+                    pinned: true,
+                  });
+                }
+              }
+            );
+            // Hide the list engagement status screen after clicking import
+            listEngagementStatus.classList.add("hidden");
+          });
+        }
+
+        if (engagementStatus === "started") {
+          // Update UI for active engagement
+          if (startListEngagement) {
+            startListEngagement.textContent = "View List Activity";
+            startListEngagement.addEventListener("click", function () {
+              const optionsUrl = chrome.runtime.getURL("options.html");
+              const targetUrlWithFragment = optionsUrl + "#listSegments";
+              chrome.runtime.openOptionsPage(() => {
+                chrome.tabs.create({ url: targetUrlWithFragment });
+              });
+            });
+          }
+          if (listStatusDesc) {
+            listStatusDesc.textContent =
+              "Your list engagement is currently active. The system is automatically engaging with your prospects.";
+          }
+          if (importMoreProspects) {
+            importMoreProspects.classList.add("hidden");
+          }
+        } else {
+          // Update UI for inactive engagement
+          if (startListEngagement) {
+            startListEngagement.textContent = "Start List Engagement";
+            startListEngagement.addEventListener("click", function () {
+              const optionsUrl = chrome.runtime.getURL("options.html");
+              const targetUrlWithFragment = optionsUrl + "#listSegments";
+              chrome.runtime.openOptionsPage(() => {
+                chrome.tabs.create({ url: targetUrlWithFragment });
+              });
+            });
+          }
+          if (listStatusDesc) {
+            listStatusDesc.textContent =
+              "Engage with your imported prospects directly from this hub. Start the engagement process or import more prospects to grow your list.";
+          }
+          if (importMoreProspects) {
+            importMoreProspects.classList.remove("hidden");
+          }
+        }
+
+        listEngagementStatus.classList.remove("hidden");
+      }
+    });
+  }
+
+  if (backFromListStatus) {
+    backFromListStatus.addEventListener("click", function () {
+      listEngagementStatus.classList.add("hidden");
+    });
+  }
+
+  if (viewListActivity) {
+    viewListActivity.addEventListener("click", function () {
+      const optionsUrl = chrome.runtime.getURL("options.html");
+      const targetUrlWithFragment = optionsUrl + "#listSegments";
+
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.create({ url: targetUrlWithFragment });
+          return;
+        }
+        chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
+          const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+          if (optionsTab) {
+            chrome.tabs.update(optionsTab.id, {
+              url: targetUrlWithFragment,
+              active: true,
+            });
+          } else {
+            chrome.tabs.create({ url: targetUrlWithFragment });
+          }
+        });
+      });
+    });
+  }
+
+  if (startListEngagement) {
+    startListEngagement.addEventListener("click", function () {
+      const optionsUrl = chrome.runtime.getURL("options.html");
+      const targetUrlWithFragment = optionsUrl + "#listSegments";
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          chrome.tabs.create({ url: targetUrlWithFragment });
+          return;
+        }
+        chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
+          const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+          if (optionsTab) {
+            chrome.tabs.update(optionsTab.id, {
+              url: targetUrlWithFragment,
+              active: true,
+            });
+          } else {
+            chrome.tabs.create({ url: targetUrlWithFragment });
+          }
+        });
+      });
+    });
+  }
 
   createListBtn.addEventListener("click", function (event) {
     event.stopPropagation();
@@ -306,10 +584,8 @@ document.addEventListener("DOMContentLoaded", async function () {
         <p class="text-xs text-gray-500 mt-1">This prompt will be used for engagements initiated from this list.</p>
       </div>
       <div class="flex justify-end space-x-3">
-        <button id="popup-cancel-new-list-btn"               class="px-4 py-2 bg-transparent text-gray-800 rounded-lg border border-[#dfdfdf] shadow-[0_1px_3px_rgba(0,0,0,0.1)] hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
->Cancel</button>
-        <button style="background-color: #101112;" id="popup-save-new-list-btn" class="primary-btn px-4 py-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
->Save List</button>
+        <button id="popup-cancel-new-list-btn" class="px-4 py-2 bg-transparent text-gray-800 rounded-lg hover:bg-gray-100 focus:outline-none" style="border: 1px solid #dfdfdf !important; box-shadow: 0 0 2px #e0e0e0, 0 1px 4px -2px rgba(24, 39, 75, .02), 0 4px 4px -2px rgba(24, 39, 75, .06);">Cancel</button>
+        <button id="popup-save-new-list-btn" class="px-4 py-2 text-white rounded-lg focus:outline-none" style="background-color: #101112;">Save List</button>
       </div>
     `;
     // Insert the form exactly where dom-content was
@@ -422,39 +698,171 @@ document.addEventListener("DOMContentLoaded", async function () {
       };
   });
 
+  // Handle clicks on the Import Prospect Card within linkedinPeopleContent
+  document
+    .getElementById("linkedinPeopleBtn")
+    .addEventListener("click", function (event) {
+      event.stopPropagation(); // Stop event from bubbling up
+      chrome.tabs.query({ pinned: true, currentWindow: true }, function (tabs) {
+        const linkedInTab = tabs.find((tab) =>
+          tab.url.includes("linkedin.com")
+        );
+        const linkedInPeopleURL =
+          "https://www.linkedin.com/search/results/people/?network=%5B%22F%22%2C%22S%22%5D&origin=FACETED_SEARCH&sid=St%3A";
 
-
-  linkedinPeopleContent.addEventListener("click", function () {
-    chrome.tabs.query({ pinned: true, currentWindow: true }, function (tabs) {
-      const linkedInTab = tabs.find((tab) => tab.url.includes("linkedin.com"));
-      const linkedInPeopleURL =
-        "https://www.linkedin.com/search/results/people/?network=%5B%22F%22%2C%22S%22%5D&origin=FACETED_SEARCH&sid=St%3A";
-
-      if (linkedInTab) {
-        chrome.tabs.update(linkedInTab.id, {
-          active: true,
-          url: linkedInPeopleURL,
-        });
-      } else {
-        chrome.tabs.create({
-          url: linkedInPeopleURL,
-          pinned: true,
-        });
-      }
+        if (linkedInTab) {
+          chrome.tabs.update(linkedInTab.id, {
+            active: true,
+            url: linkedInPeopleURL,
+          });
+        } else {
+          chrome.tabs.create({
+            url: linkedInPeopleURL,
+            pinned: true,
+          });
+        }
+      });
     });
-  });
 
   // ======================
   // Import Functionality
   // ======================
   const token = await getAuthToken();
+  const feedEngagementBtn = document.getElementById("feedEngagementBtn");
+  const feedEngagementStatus = document.getElementById("feedEngagementStatus");
+  const backFromFeedStatus = document.getElementById("backFromFeedStatus");
+  const viewFeedActivity = document.getElementById("viewFeedActivity");
+  const toggleFeedEngagement = document.getElementById("toggleFeedEngagement");
+  const feedStatusTitle = document.getElementById("feedStatusTitle");
+  const feedStatusDesc = document.getElementById("feedStatusDesc");
 
+  // Get initial engagement state
+  chrome.storage.local.get(
+    ["feed_commenter_active", "minDelay", "maxDelay"],
+    function (data) {
+      if (feedEngagementBtn) {
+        feedEngagementBtn.addEventListener("click", function () {
+          if (feedEngagementStatus) {
+            feedEngagementStatus.classList.remove("hidden");
+            updateFeedEngagementUI(
+              data.feed_commenter_active,
+              data.minDelay,
+              data.maxDelay
+            );
+          }
+        });
+      }
+    }
+  );
+
+  if (backFromFeedStatus) {
+    backFromFeedStatus.addEventListener("click", function () {
+      feedEngagementStatus.classList.add("hidden");
+    });
+  }
+
+  if (viewFeedActivity) {
+    viewFeedActivity.addEventListener("click", function (event) {
+      event.stopPropagation(); // Prevent event from bubbling to linkedinPeopleContent
+
+      const optionsUrl = chrome.runtime.getURL("options.html");
+      const targetUrlWithFragment = optionsUrl + "#history";
+
+      // Ensure the options page is open and focused, then set the fragment.
+      chrome.runtime.openOptionsPage(() => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Error opening options page:",
+            chrome.runtime.lastError.message
+          );
+          // Fallback: try to create the tab directly if openOptionsPage failed
+          chrome.tabs.create({ url: targetUrlWithFragment });
+          return;
+        }
+
+        // Options page is now open/focused. Find it and update its URL to ensure the fragment.
+        chrome.tabs.query({ url: optionsUrl + "*" }, (tabs) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Error querying for options tab:",
+              chrome.runtime.lastError.message
+            );
+            chrome.tabs.create({ url: targetUrlWithFragment }); // Fallback
+            return;
+          }
+
+          const optionsTab = tabs.find((tab) => tab.url.startsWith(optionsUrl));
+
+          if (optionsTab) {
+            // If the tab is found, update its URL to include the fragment and make it active.
+            chrome.tabs.update(optionsTab.id, {
+              url: targetUrlWithFragment,
+              active: true,
+            });
+          } else {
+            console.warn(
+              "Options page not found after openOptionsPage call. Creating new tab as fallback."
+            );
+            chrome.tabs.create({ url: targetUrlWithFragment });
+          }
+        });
+      });
+    });
+  }
+
+  if (toggleFeedEngagement) {
+    toggleFeedEngagement.addEventListener("click", async function () {
+      const currentState = await new Promise((resolve) => {
+        chrome.storage.local.get(["feed_commenter_active"], (data) => {
+          resolve(data.feed_commenter_active);
+        });
+      });
+
+      const newState = !currentState;
+      await chrome.storage.local.set({ feed_commenter_active: newState });
+      refreshLinkedInFeedAfterDelay();
+      // Get delays for description
+      chrome.storage.local.get(["minDelay", "maxDelay"], function (data) {
+        updateFeedEngagementUI(newState, data.minDelay, data.maxDelay);
+      });
+    });
+  }
+
+  function updateFeedEngagementUI(isActive, minDelay = 5, maxDelay = 10) {
+    if (feedStatusTitle && feedStatusDesc && toggleFeedEngagement) {
+      if (isActive) {
+        feedStatusTitle.textContent = "Auto Feed Engagement Active";
+        feedStatusDesc.textContent = `Your feed engagement is now running! The system will automatically like and comment on posts with ${Math.floor(
+          minDelay / 60000
+        )}-${Math.floor(maxDelay / 60000)} minute delays.`;
+
+        toggleFeedEngagement.textContent = "Pause Engagement";
+        toggleFeedEngagement.style.backgroundColor = "#101112";
+      } else {
+        feedStatusTitle.textContent = "Auto Feed Engagement Paused";
+        feedStatusDesc.textContent =
+          "Feed engagement is currently paused. Click the button below to start automatic engagement.";
+        toggleFeedEngagement.textContent = "Start Engagement";
+        toggleFeedEngagement.style.backgroundColor = "#101112";
+      }
+      // Set the shadow style for the View Feed Activity button
+      const viewFeedActivity = document.getElementById("viewFeedActivity");
+      if (viewFeedActivity) {
+        viewFeedActivity.style.border = "1px solid #dfdfdf";
+        viewFeedActivity.style.boxShadow =
+          "0 0 2px #e0e0e0, 0 1px 4px -2px rgba(24, 39, 75, .02), 0 4px 4px -2px rgba(24, 39, 75, .06)";
+      }
+    }
+  }
   if (token) {
     fetchCurrentTabUrl();
     domeContent.style.display = "block"; // Show main content
+    linkedinPeopleContent.style.display = "none"; // Hide LinkedIn People Search content
+
+    // Feed Engagement Card Click Handler
+
     openOptionsBtn.style.display = "block";
     statesContent.style.display = "block";
-    notLoginContent.style.display = "none";
 
     // Trigger the general core user data check from background on popup open
     chrome.runtime.sendMessage(
@@ -521,9 +929,11 @@ document.addEventListener("DOMContentLoaded", async function () {
             !boardSelect.options[0].value
           ) {
             // Only the placeholder is there
-            boardSelect.innerHTML = '<option value="">No boards found</option>';
+            boardSelect.innerHTML =
+              '<option value="">No workspace found</option>';
           } else if (boardSelect.options.length === 0) {
-            boardSelect.innerHTML = '<option value="">No boards found</option>';
+            boardSelect.innerHTML =
+              '<option value="">No workspace found</option>';
           }
           // Clear dependent dropdowns if no valid board is selected or found
           contactTypeSelect.innerHTML = "";
@@ -535,10 +945,10 @@ document.addEventListener("DOMContentLoaded", async function () {
   } else {
     // Hide the import buttons if token is not present
     if (importBtn) {
-      importBtn.style.display = 'none';
+      importBtn.style.display = "none";
     }
     if (importBtn2) {
-      importBtn2.style.display = 'none';
+      importBtn2.style.display = "none";
     }
     // Check if on LinkedIn People Search page
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -552,7 +962,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         domeContent.style.display = "block";
         openOptionsBtn.style.display = "block";
         statesContent.style.display = "block";
-        notLoginContent.style.display = "none";
+        linkedinPeopleContent.style.display = "none";
 
         // Disable all selects and import button, set placeholder
         [
@@ -591,6 +1001,11 @@ document.addEventListener("DOMContentLoaded", async function () {
             domeContent.nextSibling
           );
         }
+        if (!token) {
+          domeContent.style.display = "none";
+        }
+
+        // Ensure login button opens the ManagePlus URL
         // Add event listener for login button
         const loginBtnBelow = document.getElementById(
           "loginBtnBelowDomContent"
@@ -604,7 +1019,6 @@ document.addEventListener("DOMContentLoaded", async function () {
         domeContent.style.display = "none";
         openOptionsBtn.style.display = "block";
         statesContent.style.display = "block";
-        notLoginContent.style.display = "block";
         // Remove login message if present
         const loginMsg = document.getElementById("loginMsgBelowDomContent");
         if (loginMsg) loginMsg.remove();

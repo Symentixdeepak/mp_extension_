@@ -1,6 +1,10 @@
 // profile.js - LinkedIn Profile Scraper with GPT connection request message generation
 
-const { APIURL } = require("../../utils/constant");
+const {
+  APIURL,
+  connectionRequestSystemPrompt,
+  anlyzerSystemPrompt,
+} = require("../../utils/constant");
 const { showNotification } = require("../../utils/notification");
 const {
   populateBoards,
@@ -17,6 +21,45 @@ const {
 
 const minDelay = 3000;
 const maxDelay = 4000;
+
+// Generate random delay between min and max seconds
+function getRandomDelay(minSeconds, maxSeconds) {
+  const min = minSeconds * 1000; // Convert to milliseconds
+  const max = maxSeconds * 1000;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Sleep function with random delay
+function randomSleep(minSeconds = 20, maxSeconds = 30) {
+  const delay = getRandomDelay(minSeconds, maxSeconds);
+  console.log(`Waiting for ${delay / 1000} seconds...`);
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+// Extract percentage from text
+function extractPercentage(text) {
+  if (!text) return 0;
+
+  // Look for percentage patterns like "60%", "60 %", "60percent", etc.
+  const percentageMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (percentageMatch) {
+    return parseFloat(percentageMatch[1]);
+  }
+
+  // Look for "X percent" patterns
+  const percentMatch = text.match(/(\d+(?:\.\d+)?)\s*percent/i);
+  if (percentMatch) {
+    return parseFloat(percentMatch[1]);
+  }
+
+  // Look for "X out of 100" patterns
+  const outOfMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:out\s*of|\/)\s*100/i);
+  if (outOfMatch) {
+    return parseFloat(outOfMatch[1]);
+  }
+
+  return 0;
+}
 
 // Utility function to safely get text content and clean duplicates
 function getTextContent(selector, container = document) {
@@ -366,6 +409,92 @@ async function callApi(config) {
   });
 }
 
+// NEW: Analyze profile against user criteria
+async function analyzeProfileMatch(userQuery) {
+  try {
+    // Extract profile data
+    const { firstName, lastName } = getFirstLastName();
+    const jobTitle = getJobTitle();
+    const about = getAbout();
+
+    // Handle cases where profile data might be missing
+    const hasJobTitle = jobTitle && jobTitle.trim().length > 0;
+    const hasAbout = about && about.trim().length > 0;
+    const hasName = firstName && firstName.trim().length > 0;
+
+    // If no meaningful data is available, return 0
+    if (!hasName && !hasJobTitle && !hasAbout) {
+      console.log("No meaningful profile data found for analysis");
+      return 0;
+    }
+
+    const userPrompts = `Analyze this LinkedIn profile against the criteria: "${userQuery}"
+
+Profile Data:
+Name: ${firstName} ${lastName}
+Job Title: ${jobTitle || "Not available"}
+About: ${about ? about.substring(0, 300) : "Not available"}
+
+Provide a match analysis with percentage and reasoning.`;
+
+    const body = JSON.stringify({
+      model: "llama3.1:latest",
+      messages: [
+        {
+          role: "system",
+          content: anlyzerSystemPrompt,
+        },
+        { role: "user", content: userPrompts },
+      ],
+      options: {
+        max_token: 200,
+        repeat_penalty: 1.2,
+        temperature: 0.7,
+      },
+    });
+
+    const serverUrl = `${APIURL}/ai/chat`;
+
+    const data = await callApi({
+      action: "API_POST_GENERATE_MESSAGE",
+      url: serverUrl,
+      method: "POST",
+      body,
+    });
+
+    console.log("Profile analysis response:", data);
+
+    if (data.error) {
+      console.error("Profile analysis API error:", data.error);
+      return 0;
+    }
+
+    const analysisResult = data.data.data;
+
+    // Check if the response is valid
+    if (
+      !analysisResult ||
+      analysisResult.toLowerCase().includes("null") ||
+      analysisResult.toLowerCase().trim() === "null" ||
+      analysisResult.trim().length === 0
+    ) {
+      console.log("Profile analysis returned NULL or invalid result");
+      return 0;
+    }
+
+    // Extract percentage from the analysis result
+    const matchPercentage = extractPercentage(analysisResult);
+
+    console.log("Profile analysis result:", analysisResult);
+    console.log("Extracted match percentage:", matchPercentage);
+
+    return matchPercentage;
+  } catch (error) {
+    console.error("Error analyzing profile match:", error);
+    return 0;
+  }
+}
+
 // Generate GPT Connection Request Message function
 async function generateConnectionRequestMessage() {
   try {
@@ -400,46 +529,21 @@ async function generateConnectionRequestMessage() {
       profileInfo += `\nAbout: ${about.substring(0, 200)}`;
     }
 
-    const prompt = `Generate a professional LinkedIn connection request message for:
+    const prompt = `Create a 5-10 word LinkedIn connection message for:
 ${profileInfo}
 
-Create a personalized, professional connection request message in 10-15 words${
+Generate a brief, natural connection request${
       hasJobTitle || hasAbout
-        ? " that references their available profile information"
-        : " based on their name"
+        ? " mentioning their professional background"
+        : " using their name professionally"
     }.`;
-
-    const systemPrompt = `You are a professional LinkedIn connection request message generator. Generate personalized, professional connection request messages based on the person's profile data.
-
-Rules:
-1. Keep message between 10-15 words
-2. Be professional and friendly
-3. Reference their job title or background if available
-4. Make it personalized but not overly familiar
-5. Don't ask questions
-6. Use professional tone
-7. Output ONLY the message text, no quotes or explanations
-8. If unable to generate a proper message, return NULL
-
-Guidelines for different scenarios:
-- If job title is available: Reference their professional role
-- If only about section is available: Reference their background/interests
-- If only name is available: Create a general professional connection message
-- If no meaningful data: Return NULL
-
-Examples:
-- "Hi John, fellow software engineer interested in connecting and sharing insights."
-- "Hello Sarah, admire your marketing expertise, would love to connect professionally."
-- "Hi Mike, impressed by your data science background, let's connect and network."
-- "Hi Lisa, would love to connect and expand our professional network."
-`;
 
     const body = JSON.stringify({
       model: "llama3.1:latest",
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: connectionRequestSystemPrompt,
         },
         { role: "user", content: prompt },
       ],
@@ -804,13 +908,63 @@ async function handleRedirect() {
   });
 }
 
-// Main initialization function with GPT connection request integration
+let commentsPosted = 0;
+let postsLiked = 0;
+let postsScanned = 0;
+let connectionSent = 0;
+// Main initialization function with profile analysis and improved delays
 async function initializeProfile() {
+  const data = await chrome.storage.local.get([
+    "commentsPosted",
+    "postsLiked",
+    "postsScanned",
+    "connectionSent",
+  ]);
+  const today = new Date().toDateString();
+  if (data.lastResetDate !== today) {
+    chrome.storage.local.set({
+      commentsPosted: 0,
+      postsScanned: 0,
+      postsLiked: 0,
+      connectionSent: 0,
+      lastResetDate: today,
+    });
+    commentsPosted = 0;
+    postsScanned = 0;
+    postsLiked = 0;
+    connectionSent = 0;
+  } else {
+    commentsPosted = data.commentsPosted || 0;
+    postsScanned = data.postsScanned || 0;
+    postsLiked = data.postsLiked || 0;
+    connectionSent = data.connectionSent || 0;
+  }
+
+  function updateStats() {
+    chrome.storage.local.set({
+      commentsPosted: commentsPosted,
+      postsScanned: postsScanned,
+      postsLiked: postsLiked,
+      connectionSent: connectionSent,
+    });
+  }
   try {
     console.log("Profile.js initializing...");
+    const statusData = await chrome.storage.local.get(["engagement_status"]);
+    const engagementStatus = statusData.engagement_status;
+    const isFeedCommenterActive = await chrome.storage.local.get([
+      "topic_commenter_active",
+    ]);
 
     // Wait for page to be fully loaded
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await randomSleep(2, 4);
+
+    if (
+      engagementStatus === "started" ||
+      !isFeedCommenterActive?.topic_commenter_active
+    ) {
+      return;
+    }
 
     // Get topic engagement data
     const topicEngData = await new Promise((resolve) => {
@@ -819,9 +973,22 @@ async function initializeProfile() {
       });
     });
 
+    // Extract engagement types from topicEngData
+    const engagementTypes = topicEngData.engagement_types || {};
+    const shouldLike = engagementTypes.like === true;
+    const shouldComment = engagementTypes.comment === true;
+    const shouldConnect = engagementTypes.connect === true;
+
+    console.log("Engagement types:", {
+      shouldLike,
+      shouldComment,
+      shouldConnect,
+    });
+
     // Initialize userPrompt from storage if available
-    if (topicEngData.userPrompt) {
-      userPrompt = topicEngData.userPrompt;
+    let userPrompt = "";
+    if (topicEngData.profile_prompt) {
+      userPrompt = topicEngData.profile_prompt;
     }
 
     // Get current page URL
@@ -836,6 +1003,7 @@ async function initializeProfile() {
     // NEW: Check if current URL contains /in/ - if not, handle redirect
     if (!currentPageUrl.includes("/in/")) {
       console.log("Current URL does not contain '/in/' - handling redirect");
+      await randomSleep(20, 30);
       await handleRedirect();
       return;
     }
@@ -857,7 +1025,7 @@ async function initializeProfile() {
         console.log("Visit activity API call failed, but continuing:", error);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await randomSleep(20, 30);
 
       // Step 2: Update contact action (regardless of success/failure, continue)
       try {
@@ -866,9 +1034,50 @@ async function initializeProfile() {
         console.log("Update contact action failed, but continuing:", error);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await randomSleep(20, 30);
 
-      // Step 3: Fetch profile and send connection request
+      // Step 3: Check if we should proceed with connection based on engagement types
+      if (!shouldConnect) {
+        console.log("Connect is disabled - redirecting to random topic");
+        await handleRedirect();
+        return;
+      }
+
+      // Step 4: NEW - Analyze profile match if userPrompt is available (only if connect is enabled)
+      let shouldProceed = true;
+      if (userPrompt && userPrompt.trim().length > 0) {
+        console.log("Analyzing profile match against user criteria...");
+        try {
+          const matchPercentage = await analyzeProfileMatch(userPrompt);
+          console.log(`Profile match percentage: ${matchPercentage}%`);
+
+          if (matchPercentage < 60) {
+            console.log(
+              `Profile match percentage (${matchPercentage}%) is below 60% threshold - redirecting`
+            );
+            await randomSleep(20, 30);
+            await handleRedirect();
+            return;
+          } else {
+            console.log(
+              `Profile match percentage (${matchPercentage}%) meets threshold - proceeding with connection`
+            );
+          }
+        } catch (error) {
+          console.log("Profile analysis failed, redirecting:", error);
+          await randomSleep(20, 30);
+          await handleRedirect();
+          return;
+        }
+
+        await randomSleep(20, 30);
+      } else {
+        console.log(
+          "No user prompt found - proceeding without profile analysis"
+        );
+      }
+
+      // Step 5: Fetch profile and send connection request (only if analysis passed and connect is enabled)
       try {
         // Get vanity name from current URL
         const vanityName = getVanityName(currentPageUrl);
@@ -886,9 +1095,9 @@ async function initializeProfile() {
         const memberProfile = await fetchProfileApi(vanityName, csrfToken);
         console.log("Profile fetch completed successfully");
 
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await randomSleep(20, 30);
 
-        // Step 4: Generate GPT connection request message after successful profile fetch
+        // Step 6: Generate GPT connection request message after successful profile fetch
         let customMessage = null;
         try {
           console.log("Generating GPT connection request message...");
@@ -938,7 +1147,9 @@ async function initializeProfile() {
           );
         }
 
-        // Step 5: Send connection request with retry logic
+        await randomSleep(20, 30);
+
+        // Step 7: Send connection request with retry logic
         let connectionSuccess = false;
         let sentWithMessage = false; // Track if connection was sent with custom message
 
@@ -993,13 +1204,14 @@ async function initializeProfile() {
         // If connection request failed completely, handle redirect
         if (!connectionSuccess) {
           console.log("All connection request attempts failed");
+          await randomSleep(20, 30);
           await handleRedirect();
           return;
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await randomSleep(20, 30);
 
-        // Step 6: Make activity API call with type "connectionsent" (only if connection was successful)
+        // Step 8: Make activity API call with type "connectionsent" (only if connection was successful)
         try {
           if (sentWithMessage && customMessage) {
             // Pass the message if connection was sent with custom message
@@ -1008,19 +1220,25 @@ async function initializeProfile() {
               "connectionsent",
               customMessage
             );
+            updateStats();
+            connectionSent++;
             console.log("Activity API call made with custom message");
           } else {
             // Don't pass message if connection was sent without custom message
             await makeActivityApiCall(topicEngData, "connectionsent");
+            updateStats();
+            connectionSent++;
             console.log("Activity API call made without message");
           }
         } catch (error) {
           console.log("Connection sent activity API call failed:", error);
+          await randomSleep(20, 30);
           await handleRedirect();
           return;
         }
       } catch (error) {
         console.log("Error in profile fetch or connection request:", error);
+        await randomSleep(20, 30);
         await handleRedirect();
         return;
       }
@@ -1045,6 +1263,7 @@ async function initializeProfile() {
     }
   } catch (error) {
     console.error("Error during profile initialization:", error);
+    await randomSleep(20, 30);
     await handleRedirect();
   }
 }

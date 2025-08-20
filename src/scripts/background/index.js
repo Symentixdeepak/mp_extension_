@@ -18,8 +18,13 @@ const FEED_URL = "https://www.linkedin.com/feed/";
 const FEED_RELOAD_INTERVAL = 5 * 60 * 1000; // 30 minutes
 let linkedInTab = null;
 let lastNonLinkedInTime = null;
-const REDIRECT_AFTER = 2 * 60 * 1000; // 2 minutes
-const CHECK_INTERVAL = 5000;
+const getRandomBetween = (min, max) => Math.random() * (max - min) + min;
+
+// Redirect time: between 1.8 min (108000 ms) and 2.5 min (150000 ms)
+const REDIRECT_AFTER = getRandomBetween(1.8 * 60 * 1000, 2.5 * 60 * 1000);
+
+// Check interval: between 5 sec (5000 ms) and 10 sec (10000 ms)
+const CHECK_INTERVAL = getRandomBetween(5000, 10000);
 
 console.log("Loading background scripts....");
 // Set default values when extension is installed
@@ -597,8 +602,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
           }
 
           try {
-            const { url, sessionId, promptValue, contactTypeId, businessGoal } =
-              request;
+            const {
+              url,
+              sessionId,
+              promptValue,
+              contactTypeId,
+              businessGoal,
+              engagementTypes,
+            } = request;
             const response = await fetch(`${APIURL}/linkedin-topic`, {
               method: "POST",
               headers: {
@@ -613,6 +624,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 prompt: promptValue,
                 segment_id: contactTypeId,
                 goal_prompt: businessGoal || "",
+                engagement_types: {
+                  like: engagementTypes?.like,
+                  comment: engagementTypes?.comment,
+                  connect: engagementTypes?.connect,
+                },
+                profile_prompt: request.profilePrompt || null,
               }),
             });
 
@@ -708,8 +725,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     return true; // Indicate async response
   } else if (request.action === "DELAYED_FEED_REDIRECT") {
     console.log("requesthit", request.action);
-    const min = 4000; // 2 seconds
-    const max = 6000; // 4 seconds
+    const min = 10000; // 2 seconds
+    const max = 20000; // 4 seconds
     const delay = Math.floor(Math.random() * (max - min + 1)) + min;
     setTimeout(() => {
       // Use correct wildcard pattern for tab query
@@ -811,7 +828,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!response.ok) throw new Error(`API error: ${response.status}`);
 
             const contactData = await response.json();
-            console.log("Contact creation response:", contactData); 
+            console.log("Contact creation response:", contactData);
             const createdContactId = contactData?.data?._id;
 
             if (!createdContactId) {
@@ -891,7 +908,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             // Now create the contact with lifecycle stage
             const response = await fetch(
-              `${APIURL}/customer/${request.data.contact_id}?identifier=mp_customer_linkedin_profile`,
+              `${APIURL}/customer/${request.data.contact_id}`,
               {
                 method: "PUT",
                 headers: {
@@ -1765,9 +1782,9 @@ setInterval(() => {
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed");
-
+  const randomPeriod = getRandomBetween(17, 20);
   chrome.alarms.create("reloadFeed", {
-    periodInMinutes: 12,
+    periodInMinutes: randomPeriod,
   });
 
   console.log("Alarm created");

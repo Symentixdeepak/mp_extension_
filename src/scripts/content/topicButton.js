@@ -224,144 +224,250 @@ async function waitForFiltersBar(maxRetries = 20, retryDelay = 500) {
   throw new Error(`Filters bar not found after ${maxRetries} retries`);
 }
 
-// Show popover to add topic prompt and workspace
+// Inject drawer styles
+function injectDrawerStyles() {
+  if (document.getElementById("mp-topic-drawer-style")) return;
+  const style = document.createElement("style");
+  style.id = "mp-topic-drawer-style";
+  style.textContent = `
+    .mp-topic-drawer-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.30); z-index: 99998; transition: opacity 0.3s;
+    }
+    .mp-topic-drawer {
+      position: fixed; top: 0; right: 0; width: 460px; height: 100vh; background: #fff;
+      box-shadow: rgba(0,0,0,0.1) -2px 0px 5px; z-index: 99999;
+      display: flex; flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    }
+    .mp-drawer-open { transform: translateX(0); }
+    .mp-drawer-closed { transform: translateX(100%); }
+    .mp-topic-drawer-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 15px; border-bottom: 1px solid #e5e7eb;
+      position: relative;
+    }
+    .mp-topic-drawer-logo-title { display: flex; align-items: center; gap: 6px; }
+    .mp-topic-drawer-logo { width: 36px; height: 36px; border-radius: 6px; }
+    .mp-topic-drawer-title { font-size: 2rem; font-weight: 700; color: #22223b; letter-spacing: -0.5px; }
+    .mp-topic-drawer-subtitle { font-size: 1.4rem; color: #666; margin-top: 2px; }
+    .mp-topic-drawer-close {
+      background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px;
+      position: absolute; top: 12px; right: 12px; z-index: 2;
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    .mp-topic-drawer-close:hover { background: #f3f4f6; }
+    .mp-topic-drawer-close svg { width: 22px; height: 22px; color: #222; }
+    .mp-topic-drawer-main {
+      flex: 1; overflow-y: auto; padding:0px 15px; display: flex; flex-direction: column; gap: 4px;
+    }
+    .mp-topic-drawer-section { margin-bottom: 8px; }
+    .mp-topic-drawer-label { 
+      font-size: 14px; font-weight: 600; color: #333; margin-top: 6px; margin-bottom: 2px; display: block;
+    }
+    .mp-topic-drawer-sublabel {
+      font-size: 12px; color: #666; margin-bottom: 5px; display: block; line-height: 1.4;
+    }
+    .mp-topic-drawer-select {
+      width: 100%; padding:5px 10px; border: 1px solid #ddd; border-radius: 6px;
+      font-size: 14px; color: #333; background: #fff;
+      margin-bottom: 10px;
+    }
+    .mp-topic-drawer-textarea {
+      width: 100%; padding: 8px;
+      border: 1px solid #ddd; border-radius: 6px;
+      font-size: 14px; line-height: 1.5;
+      resize: vertical;
+      margin-bottom: 10px;
+    }
+    .mp-topic-drawer-textarea.large {
+      min-height: 180px;
+    }
+    .mp-topic-drawer-textarea.medium {
+      min-height: 120px;
+    }
+    .mp-topic-drawer-textarea.small {
+      min-height: 90px;
+    }
+    .mp-topic-drawer-footer {
+      padding: 12px 24px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      gap: 8px;
+      background: #fff;
+      justify-content: flex-end;
+    }
+    .mp-topic-drawer-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      min-width: 100px;
+      transition: all 0.2s;
+    }
+    .mp-topic-drawer-btn-primary {
+      background: #000;
+      color: #fff;
+      border: none;
+    }
+    .mp-topic-drawer-btn-primary:hover {
+      background: #333;
+    }
+    .mp-topic-drawer-btn-secondary {
+      background: #fff;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+    .mp-topic-drawer-btn-secondary:hover {
+      background: #f5f5f5;
+      border-color: #ccc;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// Show drawer to add topic prompt and workspace
 async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
-  let popoverEl = document.querySelector(".mp-topic-popover");
-  if (popoverEl) popoverEl.remove();
+  injectDrawerStyles();
+  let drawerEl = document.querySelector(".mp-topic-drawer");
+  if (drawerEl) drawerEl.remove();
 
   const hasToken = await checkAuthToken();
   if (!hasToken) {
     console.log("No auth token found, showing login UI");
 
-    // Create login popover
-    popoverEl = document.createElement("div");
-    popoverEl.className = "mp-topic-popover";
-    Object.assign(popoverEl.style, {
-      position: "absolute",
-      zIndex: 9999,
-      background: "#fff",
-      border: "1px solid #ccc",
-      borderRadius: "8px",
-      boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
-      padding: "0px",
-      minWidth: "350px",
-      maxWidth: "450px",
-    });
+    // Create login drawer
+    injectDrawerStyles();
+    
+    // Remove any existing drawer
+    const existingDrawer = document.querySelector(".mp-topic-drawer");
+    const existingOverlay = document.querySelector(".mp-topic-drawer-overlay");
+    if (existingDrawer) existingDrawer.remove();
+    if (existingOverlay) existingOverlay.remove();
+    
+    // Create drawer
+    const drawer = document.createElement("div");
+    drawer.className = "mp-topic-drawer mp-drawer-closed";
+
+    // Create overlay with opacity 0
+    const overlayDiv = document.createElement("div");
+    overlayDiv.className = "mp-topic-drawer-overlay";
+    overlayDiv.style.opacity = "0";
+    overlayDiv.onclick = closeDrawer;
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "mp-topic-drawer-header";
+
+    // Logo and title
+    const logoTitle = document.createElement("div");
+    logoTitle.className = "mp-topic-drawer-logo-title";
+    const headerLogo = document.createElement("img");
+    headerLogo.src = chrome.runtime.getURL("assets/logo_48.png");
+    headerLogo.alt = "ManagePlus Logo";
+    headerLogo.className = "mp-topic-drawer-logo";
+    const title = document.createElement("div");
+    title.innerHTML = `
+      <div class="mp-topic-drawer-title">Login Required</div>
+    `;
+    logoTitle.appendChild(headerLogo);
+    logoTitle.appendChild(title);
+
+    // Close button
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "mp-topic-drawer-close";
+    closeBtn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6L14 14M14 6L6 14" stroke="#222" stroke-width="2" stroke-linecap="round"/></svg>`;
+    closeBtn.onclick = closeDrawer;
+
+    header.appendChild(logoTitle);
+    header.appendChild(closeBtn);
+    drawer.appendChild(header);
 
     // Create login UI
     const loginContainer = document.createElement("div");
-    loginContainer.className = "flex flex-col items-center justify-center py-0";
+    loginContainer.className = "mp-topic-drawer-main";
 
     const contentDiv = document.createElement("div");
-    contentDiv.className = "bg-white p-4 max-w-md w-full text-center";
-    Object.assign(contentDiv.style, {
-      padding: "12px", // Increased padding
-    });
+    contentDiv.style.cssText = "text-align: center; padding: 40px 20px;";
 
     // Logo
     const logo = document.createElement("img");
     logo.src = "https://app.manageplus.io/admin/images/mp_logo_transparent.png";
     logo.alt = "ManagePlus Logo";
-    logo.className = "mx-auto mb-0";
-    Object.assign(logo.style, {
-      width: "70px", // Slightly bigger logo
-      height: "70px",
-      display: "block",
-      margin: "0 auto 16px auto", // More margin bottom
-    });
-
-    // Title
-    const title = document.createElement("h3");
-    title.textContent = "Login Required";
-    Object.assign(title.style, {
-      fontSize: "22px", // Bigger font
-      fontWeight: "bold",
-      color: "#111827",
-      textAlign: "center",
-      margin: "0 0 10px 0", // More spacing
-      lineHeight: "1.2",
-    });
+    logo.style.cssText = `
+      width: 80px;
+      height: 80px;
+      display: block;
+      margin: 0 auto 24px auto;
+      border-radius: 12px;
+    `;
 
     // Description
     const description = document.createElement("p");
-    description.textContent =
-      "To add topic you need to login to your ManagePlus account";
-    Object.assign(description.style, {
-      fontSize: "14px", // Bigger font
-      color: "#6B7280",
-      textAlign: "center",
-      marginBottom: "14px", // More spacing
-      lineHeight: "1.5",
-      padding: "0 8px", // Side padding for better text flow
-    });
+    description.textContent = "To add topic you need to login to your ManagePlus account";
+    description.style.cssText = `
+      font-size: 15px;
+      color: #6B7280;
+      text-align: center;
+      margin-bottom: 24px;
+      line-height: 1.5;
+      padding: 0 20px;
+    `;
+
+    // Login button container
+    const loginButtonContainer = document.createElement("div");
+    loginButtonContainer.style.cssText = `
+      display: flex;
+      justify-content: center;
+      padding: 0 20px;
+    `;
 
     // Login button
-    const loginContainerButton = document.createElement("div");
-    loginContainerButton.style.display = "flex";
-    loginContainerButton.style.justifyContent = "center";
-    loginContainerButton.style.alignItems = "center";
-    loginContainerButton.style.width = "100%";
-
     const loginBtn = document.createElement("button");
-    // const loginBtn = document.createElement("button");
-    loginBtn.id = "mp-login-btn";
+    loginBtn.className = "mp-topic-drawer-btn mp-topic-drawer-btn-primary";
+    loginBtn.style.minWidth = "200px";
     loginBtn.textContent = "Login to ManagePlus";
-    Object.assign(loginBtn.style, {
-      padding: "10px 12px", // More padding
-      background: "#101112",
-      color: "#fff",
-      border: "none",
-      boxShadow: "none",
-      borderRadius: "8px", // Slightly more rounded
-      fontWeight: "600",
-      fontSize: "14px", // Bigger font
-      outline: "none",
-      transition: "background 0.2s",
-      cursor: "pointer",
-      width: "50%",
-    });
-
-    // Add hover effect
-    loginBtn.addEventListener("mouseenter", () => {
-      loginBtn.style.background = "#1f2937";
-    });
-    loginBtn.addEventListener("mouseleave", () => {
-      loginBtn.style.background = "#101112";
-    });
 
     // Login button click handler
     loginBtn.onclick = () => {
-      // Open login page in new tab
       window.open("https://app.manageplus.io/", "_blank");
-      popoverEl.remove();
+      closeDrawer();
     };
 
     // Append elements
-    loginContainerButton.appendChild(loginBtn); // First append button to container
-
+    loginButtonContainer.appendChild(loginBtn);
+    
     contentDiv.appendChild(logo);
-    contentDiv.appendChild(title);
     contentDiv.appendChild(description);
-    contentDiv.appendChild(loginContainerButton); // Then append the container
+    contentDiv.appendChild(loginButtonContainer);
     loginContainer.appendChild(contentDiv);
-    popoverEl.appendChild(loginContainer);
-    document.body.appendChild(popoverEl);
+    drawer.appendChild(loginContainer);
 
-    // Position popover below the button
-    const rect = buttonEl.getBoundingClientRect();
-    popoverEl.style.top = `${rect.bottom + window.scrollY + 6}px`;
-    popoverEl.style.left = `${rect.left + window.scrollX}px`;
+    // Add overlay and drawer to document
+    document.body.appendChild(overlayDiv);
+    document.body.appendChild(drawer);
 
-    // Close popover on outside click
-    setTimeout(() => {
-      function onClickOutside(e) {
-        if (popoverEl && !popoverEl.contains(e.target)) {
-          popoverEl.remove();
-          document.removeEventListener("mousedown", onClickOutside);
-        }
-      }
-      document.addEventListener("mousedown", onClickOutside);
-    }, 0);
+    // Define close function
+    function closeDrawer() {
+        drawer.classList.remove("mp-drawer-open");
+        drawer.classList.add("mp-drawer-closed");
+        overlayDiv.style.opacity = "0";
+        setTimeout(() => {
+            drawer.remove();
+            overlayDiv.remove();
+        }, 300);
+    }
+
+    // Animate drawer in after a short delay
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            drawer.classList.remove("mp-drawer-closed");
+            drawer.classList.add("mp-drawer-open");
+            overlayDiv.style.opacity = "1";
+        });
+    });
 
     return;
   }
@@ -380,44 +486,68 @@ async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
     ? `Linkedin-${keywords}`
     : "Linkedin-default";
 
-  popoverEl = document.createElement("div");
-  popoverEl.className = "mp-topic-popover";
-  Object.assign(popoverEl.style, {
-    position: "absolute",
-    zIndex: 9999,
-    background: "#fff",
-    border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
-    padding: "12px",
-    minWidth: "400px",
-    overflowY: "auto",
-  });
+  // Create drawer
+  const drawer = document.createElement("div");
+  drawer.className = "mp-topic-drawer mp-drawer-closed";
+
+  // Create overlay
+  const overlayDiv = document.createElement("div");
+  overlayDiv.className = "mp-topic-drawer-overlay";
+  overlayDiv.onclick = closeDrawer;
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "mp-topic-drawer-header";
+
+  // Logo and title
+  const logoTitle = document.createElement("div");
+  logoTitle.className = "mp-topic-drawer-logo-title";
+  const logo = document.createElement("img");
+  logo.src = chrome.runtime.getURL("assets/logo_48.png");
+  logo.alt = "ManagePlus Logo";
+  logo.className = "mp-topic-drawer-logo";
+  const title = document.createElement("div");
+  title.innerHTML = `
+    <div class="mp-topic-drawer-title">Add New Topic</div>
+    <div class="mp-topic-drawer-subtitle">Add your topic to do engagement with this topic</div>
+  `;
+  logoTitle.appendChild(logo);
+  logoTitle.appendChild(title);
+
+  // Close button
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "mp-topic-drawer-close";
+  closeBtn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6L14 14M14 6L6 14" stroke="#222" stroke-width="2" stroke-linecap="round"/></svg>`;
+  closeBtn.onclick = closeDrawer;
+
+  header.appendChild(logoTitle);
+  header.appendChild(closeBtn);
+  drawer.appendChild(header);
+
+  // Main content
+  const main = document.createElement("div");
+  main.className = "mp-topic-drawer-main";
 
   // 1. Workspace Selection
   const workspaceLabel = document.createElement("label");
-  workspaceLabel.textContent = "Select Workspace:";
-  workspaceLabel.style.display = "block";
-  workspaceLabel.style.marginBottom = "6px";
-  workspaceLabel.style.fontWeight = "bold";
+  workspaceLabel.textContent = "Select Workspace";
+  workspaceLabel.className = "mp-topic-drawer-label";
 
   const workspaceSelect = document.createElement("select");
-  workspaceSelect.style.width = "100%";
-  workspaceSelect.style.border = "1px solid #ccc";
-  workspaceSelect.style.borderRadius = "4px";
+  workspaceSelect.className = "mp-topic-drawer-select";
   populateBoards(workspaceSelect, workspaceList);
 
   // 2. Contact Type Selection
   const contactTypeLabel = document.createElement("label");
-  contactTypeLabel.textContent = "Select List:";
-  contactTypeLabel.style.display = "block";
-  contactTypeLabel.style.marginBottom = "6px";
-  contactTypeLabel.style.fontWeight = "bold";
+  contactTypeLabel.textContent = "Select List";
+  contactTypeLabel.className = "mp-topic-drawer-label";
+  const contactTypeSubLabel = document.createElement("span");
+  contactTypeSubLabel.className = "mp-topic-drawer-sublabel";
+  contactTypeSubLabel.textContent =
+    "Select a list to save the engaged users in CRM for better organization and tracking";
 
   const contactTypeSelect = document.createElement("select");
-  contactTypeSelect.style.width = "100%";
-  contactTypeSelect.style.border = "1px solid #ccc";
-  contactTypeSelect.style.borderRadius = "4px";
+  contactTypeSelect.className = "mp-topic-drawer-select";
 
   // Add default option
   const defaultOption = document.createElement("option");
@@ -459,75 +589,160 @@ async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
 
   // 3. Business Goal Field
   const businessGoalLabel = document.createElement("label");
-  businessGoalLabel.textContent = "Business Goal: *";
-  businessGoalLabel.style.display = "block";
-  businessGoalLabel.style.marginBottom = "6px";
-  businessGoalLabel.style.fontWeight = "bold";
+  businessGoalLabel.textContent = "Business Goal *";
+  businessGoalLabel.className = "mp-topic-drawer-label";
+  const businessGoalSubLabel = document.createElement("span");
+  businessGoalSubLabel.className = "mp-topic-drawer-sublabel";
+  businessGoalSubLabel.textContent =
+    "Define your goal to determine which posts to engage with based on your target audience and business objectives";
 
   const businessGoalTextarea = document.createElement("textarea");
-  businessGoalTextarea.style.width = "100%";
-  businessGoalTextarea.style.height = "60px";
-  businessGoalTextarea.style.padding = "8px";
-  businessGoalTextarea.style.border = "1px solid #ccc";
-  businessGoalTextarea.style.borderRadius = "4px";
-  businessGoalTextarea.style.resize = "vertical";
+  businessGoalTextarea.className = "mp-topic-drawer-textarea small";
   businessGoalTextarea.placeholder =
     "Example: find only people who is hiring email marketer";
   businessGoalTextarea.rows = 3;
 
+  // 3.5 Engagement Type Section
+  const engagementTypeLabel = document.createElement("label");
+  engagementTypeLabel.textContent = "Engagement Type";
+  engagementTypeLabel.className = "mp-topic-drawer-label";
+  const engagementTypeSubLabel = document.createElement("span");
+  engagementTypeSubLabel.className = "mp-topic-drawer-sublabel";
+  engagementTypeSubLabel.textContent =
+    "Choose engagement types you want to perform with this topic";
+
+  // Create checkbox container with flex layout
+  const checkboxContainer = document.createElement("div");
+  checkboxContainer.style.cssText = `
+    display: flex;
+    gap: 24px;
+    margin-bottom: 10px;
+  `;
+
+  // Function to create a checkbox with label
+  function createCheckbox(id, text) {
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = `
+      display: flex;
+    
+      gap: 8px;
+    `;
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = id;
+    checkbox.checked = true; // Default checked
+    checkbox.style.cssText = `
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      cursor: pointer;
+    `;
+
+    const label = document.createElement("label");
+    label.htmlFor = id;
+    label.textContent = text;
+    label.style.cssText = `
+      font-size: 14px;
+      color: #374151;
+      cursor: pointer;
+      user-select: none;
+    `;
+
+    wrapper.appendChild(checkbox);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  // Create checkboxes
+  const likeCheckbox = createCheckbox("engagementLike", "Like");
+  const commentCheckbox = createCheckbox("engagementComment", "Comment");
+  const connectCheckbox = createCheckbox("engagementConnect", "Connect");
+  
+  // Add checkboxes to container in correct sequence
+  checkboxContainer.appendChild(likeCheckbox);
+  checkboxContainer.appendChild(commentCheckbox);
+  checkboxContainer.appendChild(connectCheckbox);
+
   // 4. Comment Engagement Prompt Field
   const promptLabel = document.createElement("label");
-  promptLabel.textContent = "Comment Engagement Prompt: *";
-  promptLabel.style.display = "block";
-  promptLabel.style.marginBottom = "6px";
-  promptLabel.style.fontWeight = "bold";
+  promptLabel.textContent = "Comment Engagement Prompt *";
+  promptLabel.className = "mp-topic-drawer-label";
+  const promptSubLabel = document.createElement("span");
+  promptSubLabel.className = "mp-topic-drawer-sublabel";
+  promptSubLabel.textContent =
+    "This is the engagement prompt that AI will use to generate comments on posts. Make it specific to get relevant responses.";
 
   const promptTextarea = document.createElement("textarea");
-  promptTextarea.style.width = "100%";
-  promptTextarea.style.height = "120px";
-  promptTextarea.style.padding = "8px";
-  promptTextarea.style.marginBottom = "14px";
-  promptTextarea.style.border = "1px solid #ccc";
-  promptTextarea.style.borderRadius = "4px";
-  promptTextarea.style.resize = "vertical";
+  promptTextarea.className = "mp-topic-drawer-textarea large";
   promptTextarea.value = defaultPrompt || "";
+  promptTextarea.rows = 7;
 
-  // Save Button
+  // 5. Profile Connection Prompt Field
+  const profilePromptLabel = document.createElement("label");
+  profilePromptLabel.textContent = "Profile Connection Prompt (Optional)";
+  profilePromptLabel.className = "mp-topic-drawer-label";
+  const profilePromptSubLabel = document.createElement("span");
+  profilePromptSubLabel.className = "mp-topic-drawer-sublabel";
+  profilePromptSubLabel.textContent =
+    "Optional: Define criteria for connection requests. If not provided, connections will be sent without AI verification. Add specific criteria to filter connection requests.";
+
+  const profilePromptTextarea = document.createElement("textarea");
+  profilePromptTextarea.className = "mp-topic-drawer-textarea medium";
+  profilePromptTextarea.placeholder =
+    "Example: Connect with professionals in digital marketing who have experience in email marketing or are looking to hire email marketers";
+  profilePromptTextarea.rows = 5;
+
+  // Footer with buttons
+  const footer = document.createElement("div");
+  footer.className = "mp-topic-drawer-footer";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.className = "mp-topic-drawer-btn mp-topic-drawer-btn-secondary";
+  cancelBtn.onclick = closeDrawer;
+
   const saveBtn = document.createElement("button");
   saveBtn.textContent = "Save";
-  Object.assign(saveBtn.style, {
-    background: "#000000",
-    color: "#fff",
-    border: "none",
-    borderRadius: "5px",
-    padding: "8px 18px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    width: "100%",
-  });
+  saveBtn.className = "mp-topic-drawer-btn mp-topic-drawer-btn-primary";
 
-  // Save button click handler
-  saveBtn.onclick = async () => {
-    const selectedWorkspace = workspaceSelect.value;
-    const selectedContactType = contactTypeSelect.value;
-    const businessGoal = businessGoalTextarea.value.trim();
-    const promptValue = promptTextarea.value.trim() || defaultPrompt || "";
+    // Save button click handler
+    saveBtn.onclick = async () => {
+      const selectedWorkspace = workspaceSelect.value;
+      const selectedContactType = contactTypeSelect.value;
+      const businessGoal = businessGoalTextarea.value.trim();
+      const promptValue = promptTextarea.value.trim() || defaultPrompt || "";
+      const profilePrompt = profilePromptTextarea.value.trim();
+      
+      // Get engagement type values
+      const like = document.getElementById("engagementLike").checked;
+      const comment = document.getElementById("engagementComment").checked;
+      const connect = document.getElementById("engagementConnect").checked;
 
-    // Validation - all fields required
-    if (!selectedWorkspace) {
-      showNotification("Please select a workspace", "error");
-      return;
-    }
-    if (!businessGoal) {
-      showNotification("Business Goal is required", "error");
-      return;
-    }
-    if (!promptValue) {
-      showNotification("Comment Engagement Prompt is required", "error");
-      return;
-    }
+      // Validation - all fields required
+      if (!selectedWorkspace) {
+        showNotification("Please select a workspace", "error");
+        return;
+      }
+      if (!businessGoal) {
+        showNotification("Business Goal is required", "error");
+        return;
+      }
+      if (!promptValue) {
+        showNotification("Comment Engagement Prompt is required", "error");
+        return;
+      }
+      if (!like && !comment && !connect) {
+        showNotification("Please select at least one engagement type", "error");
+        return;
+      }
+      // Profile prompt is optional, no validation needed
+      
+      try {
+      // Disable save button while processing
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
 
-    try {
       let contactTypeId = selectedContactType;
 
       // If default option is selected, create new contact type
@@ -544,50 +759,86 @@ async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
         {
           selected_workspace: selectedWorkspace,
           topic_prompt: promptValue,
+          profile_prompt: profilePrompt,
         },
         async () => {
           await handleAddTopicToList(
             selectedWorkspace,
             promptValue,
             businessGoal,
-            contactTypeId
+            contactTypeId,
+            profilePrompt,
+            like,
+            comment,
+            connect
           );
-          popoverEl.remove();
+          closeDrawer();
         }
-      );
+      )
     } catch (error) {
       console.error("Error saving topic:", error);
       showNotification("Failed to save topic", "error");
+    } finally {
+      // Re-enable save button
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
     }
   };
 
-  // Append all elements
-  popoverEl.appendChild(workspaceLabel);
-  popoverEl.appendChild(workspaceSelect);
-  popoverEl.appendChild(contactTypeLabel);
-  popoverEl.appendChild(contactTypeSelect);
-  popoverEl.appendChild(businessGoalLabel);
-  popoverEl.appendChild(businessGoalTextarea);
-  popoverEl.appendChild(promptLabel);
-  popoverEl.appendChild(promptTextarea);
-  popoverEl.appendChild(saveBtn);
-  document.body.appendChild(popoverEl);
+  // Append all elements to main
+  main.appendChild(workspaceLabel);
 
-  // Position popover below the button
-  const rect = buttonEl.getBoundingClientRect();
-  popoverEl.style.top = `${rect.bottom + window.scrollY + 6}px`;
-  popoverEl.style.left = `${rect.left + window.scrollX}px`;
+  main.appendChild(workspaceSelect);
 
-  // Close popover on outside click
+  main.appendChild(contactTypeLabel);
+  main.appendChild(contactTypeSubLabel);
+  main.appendChild(contactTypeSelect);
+
+  main.appendChild(businessGoalLabel);
+  main.appendChild(businessGoalSubLabel);
+  main.appendChild(businessGoalTextarea);
+
+  main.appendChild(engagementTypeLabel);
+  main.appendChild(engagementTypeSubLabel);
+  main.appendChild(checkboxContainer);
+
+  main.appendChild(promptLabel);
+  main.appendChild(promptSubLabel);
+  main.appendChild(promptTextarea);
+
+  main.appendChild(profilePromptLabel);
+  main.appendChild(profilePromptSubLabel);
+  main.appendChild(profilePromptTextarea);
+
+  // Append footer with buttons
+  footer.appendChild(cancelBtn);
+  footer.appendChild(saveBtn);
+
+  // Construct drawer
+  drawer.appendChild(main);
+  drawer.appendChild(footer);
+
+  // Add overlay and drawer to document
+  document.body.appendChild(overlayDiv);
+  document.body.appendChild(drawer);
+
+  // Animate drawer in
   setTimeout(() => {
-    function onClickOutside(e) {
-      if (popoverEl && !popoverEl.contains(e.target)) {
-        popoverEl.remove();
-        document.removeEventListener("mousedown", onClickOutside);
-      }
-    }
-    document.addEventListener("mousedown", onClickOutside);
-  }, 0);
+    drawer.classList.remove("mp-drawer-closed");
+    drawer.classList.add("mp-drawer-open");
+    overlayDiv.style.opacity = "1";
+  }, 10);
+
+  // Close drawer function
+  function closeDrawer() {
+    drawer.classList.remove("mp-drawer-open");
+    drawer.classList.add("mp-drawer-closed");
+    overlayDiv.style.opacity = "0";
+    setTimeout(() => {
+      drawer.remove();
+      overlayDiv.remove();
+    }, 300);
+  }
 }
 
 // Remove any existing topic button in the filters bar
@@ -836,7 +1087,11 @@ async function handleAddTopicToList(
   selectedWorkspace,
   promptValue,
   businessGoal,
-  contactTypeId
+  contactTypeId,
+  profilePrompt,
+  like,
+  comment,
+  connect
 ) {
   try {
     const sessionId = await getLinkedInSessionId();
@@ -866,6 +1121,12 @@ async function handleAddTopicToList(
           businessId: selectedWorkspace,
           businessGoal: businessGoal,
           contactTypeId: contactTypeId,
+          profilePrompt: profilePrompt,
+          engagementTypes: {
+            like,
+            comment,
+            connect
+          },
         },
         (response) => {
           if (chrome.runtime.lastError) {

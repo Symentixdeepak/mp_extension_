@@ -214,178 +214,523 @@
         </button>
       </div>
 
-      <!-- Not Logged In Section -->
-      <div
-        id="notLoginContent"
-        style="display: none"
-        class="mt-4 bg-white rounded-lg shadow p-3"
-      >
-        <!-- New quick actions section -->
-        <div class="mb-4 flex flex-col gap-2">
-          <button
-            id="quickImportProspects"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium transition"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Import Prospects
-          </button>
-          <button
-            id="quickViewActivity"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 font-medium transition"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-              />
-            </svg>
-            View Activity
-          </button>
-          <button
-            id="quickManageEngagement"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium transition"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 17v-2a4 4 0 018 0v2m-4-4a4 4 0 100-8 4 4 0 000 8zm-6 8a2 2 0 012-2h12a2 2 0 012 2v1H3v-1z"
-              />
-            </svg>
-            Manage Engagement
-          </button>
-          <button
-            id="quickStartEngagement"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition"
-            style="background-color: #fff7ed; color: #d97706"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 17v-2a4 4 0 018 0v2m-4-4a4 4 0 100-8 4 4 0 000 8zm-6 8a2 2 0 012-2h12a2 2 0 012 2v1H3v-1z"
-              />
-            </svg>
-            Start Feed Engagement
-          </button>
-        </div>
-        <div
-          style="
-            flex-direction: column;
-            justify-content: center;
-            display: flex;
-            align-items: center;
-          "
-        >
-     
-      
-        </div>
-      </div>
+   
+   
 
       <!-- Not linkedin people Section -->
       <div
         id="linkedinPeopleContent"
-        style="display: none"
+
         class="mt-2 bg-white rounded-lg shadow p-3"
       >
-        <div
-          style="
-            flex-direction: column;
-            justify-content: center;
-            display: flex;
-            align-items: center;
-          "
-        >
-          <div class="mr-4">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5 text-gray-600"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
+        <div class="grid grid-cols-2 gap-2">
+          <!-- Feed Engagement Card -->
+          <div
+            data-tab="feedEngagement"
+            id="feedEngagementBtn"
+            class="feature-card bg-white rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100"
+          >
+            <div
+              class="flex items-center justify-center w-8 h-8 mb-2 bg-blue-50 rounded-lg"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-          </div>
-          <div>
-            <div class="flex flex-col items-center mt-1">
-              <h2 class="text-lg font-semibold text-gray-800 mb-1">
-                No prospect to import here
-              </h2>
-              <p class="text-xs text-gray-600 mb-2 text-center">
-                You need to go to a LinkedIn page, perform a search, and then
-                navigate to the 'People' tab to import your prospects.
-              </p>
-              <div
-                class="flex flex-col items-center space-y-4 w-full max-w-md mx-auto mt-4"
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5 text-blue-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z"
+                />
+              </svg>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-0.5">
+              Feed Engagement
+            </h3>
+            <p class="text-xs text-gray-500">Automate feed engagement</p>
+          </div>
+
+          <!-- Feed Engagement Status Screen -->
+          <div
+            id="feedEngagementStatus"
+            class="hidden fixed inset-0 bg-white z-50"
+          >
+            <!-- Header -->
+            <div class="flex items-center justify-between p-3 border-b">
+              <div class="flex items-center gap-2">
                 <button
-                  style="width: 250px"
-                  class="mt-1 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-300"
-                  id="linkedinPeopleBtn"
+                  id="backFromFeedStatus"
+                  class="text-gray-600 hover:text-gray-800"
                 >
-                  Navigate to LinkedIn Search
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
                 </button>
-                <div class="flex items-center w-full">
-                  <hr class="flex-grow border-t border-gray-300" />
-                  <span class="mx-3 text-gray-500 font-medium">OR</span>
-                  <hr class="flex-grow border-t border-gray-300" />
+                <h2 class="text-lg font-semibold">Feed Engagement</h2>
+              </div>
+            </div>
+
+            <!-- Content -->
+            <div class="p-4">
+              <!-- Status Card -->
+              <div class="bg-blue-50 rounded-lg p-4 mb-4">
+                <div class="flex items-start gap-3">
+                  <div class="flex-shrink-0">
+                    <div
+                      class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-6 w-6 text-blue-500"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                  <div>
+                    <h3
+                      class="text-sm font-semibold text-black-900"
+                      id="feedStatusTitle"
+                    >
+                      Auto Feed Engagement Active
+                    </h3>
+                    <p class="text-xs text-black-700 mt-1" id="feedStatusDesc">
+                      The system will automatically like and comment on posts
+                      with 5-10 minute delays.
+                    </p>
+                  </div>
                 </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="space-y-3">
+                <button
+                  id="viewFeedActivity"
+                  class="w-full hover:bg-gray-200 text-black-800 font-semibold py-2.5 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                  </svg>
+                  View Feed Activity
+                </button>
 
                 <button
-                  style="width: 250px"
-                  class="mt-1 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-300"
-                  id="engagementTabBtn"
+                  id="toggleFeedEngagement"
+                  class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300"
                 >
-                  Start List Engagement
+                  Pause Engagement
                 </button>
               </div>
             </div>
           </div>
+
+          <!-- List Engagement Card -->
+          <div
+            data-tab="listEngagement"
+            id="engagementTabBtn"
+            class="feature-card bg-white rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100"
+          >
+            <div
+              class="flex items-center justify-center w-8 h-8 mb-2 bg-indigo-50 rounded-lg"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5 text-indigo-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
+              </svg>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-0.5">
+              List Engagement
+            </h3>
+            <p class="text-xs text-gray-500">Target specific engagement</p>
+          </div>
+
+          <!-- List Engagement Status Screen -->
+          <div
+            id="listEngagementStatus"
+            class="hidden fixed inset-0 bg-white z-50"
+          >
+            <!-- Header -->
+            <div class="flex items-center justify-between p-3 border-b">
+              <div class="flex items-center gap-2">
+                <button
+                  id="backFromListStatus"
+                  class="text-gray-600 hover:text-gray-800"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                </button>
+                <h2 class="text-lg font-semibold">List Engagement</h2>
+              </div>
+            </div>
+
+            <!-- Content -->
+            <div class="p-4">
+              <!-- Status Card -->
+              <div class="bg-indigo-50 rounded-lg p-4 mb-4">
+                <div class="flex items-start gap-3">
+                  <div class="flex-shrink-0">
+                    <div
+                      class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-6 w-6 text-indigo-500"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-semibold text-black-900">
+                      Prospect Engagement Hub
+                    </h3>
+                    <p class="text-xs text-black-700 mt-1" id="listStatusDesc">
+                      Engage with your imported prospects directly from this
+                      hub. Start the engagement process or import more prospects
+                      to grow your list.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="space-y-3">
+                <button
+                  id="startListEngagement"
+                  style="background-color: #101112"
+                  class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                  Start List Engagement
+                </button>
+
+                <button
+                  id="importMoreProspects"
+                  class="w-full hover:bg-gray-200 text-black-800 font-semibold py-2.5 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+                  style="
+                    border: 1px solid #dfdfdf !important;
+                    box-shadow: 0 0 2px #e0e0e0,
+                      0 1px 4px -2px rgba(24, 39, 75, 0.02),
+                      0 4px 4px -2px rgba(24, 39, 75, 0.06);
+                  "
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                  </svg>
+                  Import More Prospects
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Import Prospect Card -->
+          <div
+            data-tab="importProspect"
+            id="linkedinPeopleBtn"
+            class="feature-card bg-white rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100"
+          >
+            <div
+              class="flex items-center justify-center w-8 h-8 mb-2 bg-green-50 rounded-lg"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5 text-green-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-0.5">
+              Import Prospect
+            </h3>
+            <p class="text-xs text-gray-500">Import targeted prospects</p>
+          </div>
+
+          <!-- Topic Engagement Card -->
+          <div
+            id="topicEngagementBtn"
+            class="feature-card bg-white rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-100"
+          >
+            <div
+              class="flex items-center justify-center w-8 h-8 mb-2 bg-purple-50 rounded-lg"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5 text-purple-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                />
+              </svg>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-0.5">
+              Topic Engagement
+            </h3>
+            <p class="text-xs text-gray-500">Topic based engagement</p>
+          </div>
         </div>
+
+        <!-- Topic Engagement Status Screen -->
+        <div
+          id="topicEngagementStatus"
+          class="hidden fixed inset-0 bg-white z-50"
+        >
+          <!-- Header -->
+          <div class="flex items-center justify-between p-3 border-b">
+            <div class="flex items-center gap-2">
+              <button
+                id="backFromTopicStatus"
+                class="text-gray-600 hover:text-gray-800"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+              <h2 class="text-lg font-semibold">Topic Engagement</h2>
+            </div>
+          </div>
+
+          <!-- Content -->
+          <div class="p-4">
+            <!-- Status Card -->
+            <div class="bg-purple-50 rounded-lg p-4 mb-4">
+              <div class="flex items-start gap-3">
+                <div class="flex-shrink-0">
+                  <div
+                    class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-6 w-6 text-purple-500"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                      />
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <h3
+                    class="text-sm font-semibold text-black-900"
+                    id="topicStatusTitle"
+                  >
+                    Topic Engagement Active
+                  </h3>
+                  <p class="text-xs text-black-700 mt-1" id="topicStatusDesc">
+                    Your topic engagement is active. The system is automatically
+                    engaging with your selected topics.
+                  </p>
+                  <p class="text-xs text-black-700 mt-2">
+                    Active topics:
+                    <span id="activeTopicsCount" class="font-semibold">3</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="space-y-3">
+              <button
+                id="viewTopicList"
+                class="w-full hover:bg-gray-200 text-black-800 font-semibold py-2.5 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+                style="
+                  border: 1px solid #dfdfdf !important;
+                  box-shadow: 0 0 2px #e0e0e0,
+                    0 1px 4px -2px rgba(24, 39, 75, 0.02),
+                    0 4px 4px -2px rgba(24, 39, 75, 0.06);
+                "
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                  />
+                </svg>
+                View Topic List
+              </button>
+
+              <button
+                id="addNewTopic"
+                style="background-color: #101112"
+                class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 px-4 rounded-lg transition duration-300 flex items-center justify-center gap-2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                Add New Topic
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <style>
+          .feature-card {
+            transition: all 0.2s ease-in-out;
+          }
+          .feature-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+              0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          }
+        </style>
       </div>
 
-      <!-- Not Enough Credits Section -->
+  
 
       <!-- Progress Section -->
 

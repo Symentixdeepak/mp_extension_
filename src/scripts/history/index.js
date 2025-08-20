@@ -79,9 +79,18 @@ if (!window.historyManagerInitialized) {
         } else {
           showNotification("Error loading engagement activity.", "error");
         }
-      } else if (tabId === "topic") {
+      } // Replace the existing topic tab handling with this:
+      else if (tabId === "topic") {
         if (window.topicListManagerInstance) {
-          window.topicListManagerInstance.initializeIfNeeded();
+          await window.topicListManagerInstance.initializeIfNeeded();
+
+          // Check if we should open the topic drawer
+          if (window.shouldOpenTopicDrawer) {
+            setTimeout(() => {
+              window.topicListManagerInstance.showAddTopicPopover();
+              window.shouldOpenTopicDrawer = false; // Reset flag
+            }, 1000); // 1 second delay as requested
+          }
         } else {
           showNotification("Error loading topic list.", "error");
         }
@@ -89,9 +98,17 @@ if (!window.historyManagerInitialized) {
     }
 
     // Function to handle hash changes and initial load
+    // Function to handle hash changes and initial load
     async function handleHash() {
       let currentHash = window.location.hash.substring(1); // Remove #
-      const localTabButtons = document.querySelectorAll(".tab-button"); // Re-query in case they are dynamic, though unlikely here
+      const localTabButtons = document.querySelectorAll(".tab-button");
+
+      // Handle topic-create special case
+      if (currentHash === "topic-create") {
+        // Redirect to topic tab and set flag to open drawer
+        currentHash = "topic";
+        window.shouldOpenTopicDrawer = true;
+      }
 
       const isValidHash = Array.from(localTabButtons).some(
         (btn) => btn.getAttribute("data-tab") === currentHash
@@ -99,19 +116,15 @@ if (!window.historyManagerInitialized) {
 
       if (!currentHash || !isValidHash) {
         currentHash = defaultTabId;
-        // Update hash only if it's not already the default, to avoid loop if default is already set
         if (defaultTabId && window.location.hash !== `#${defaultTabId}`) {
           window.location.hash = `#${defaultTabId}`;
-          // hashchange event will trigger this function again with the correct hash, so we return.
           return;
         }
       }
 
-      // If after potential defaulting, hash is valid and exists
       if (currentHash && (isValidHash || currentHash === defaultTabId)) {
         await showTab(currentHash);
       } else if (localTabButtons.length > 0) {
-        // Fallback if hash logic somehow fails to set a valid one, show the determined default
         await showTab(defaultTabId);
       }
     }
@@ -455,9 +468,11 @@ if (!window.historyManagerInitialized) {
       const container = document.getElementById("topic-list-controls");
       if (!container) return;
       if (document.getElementById("add-topic-btn")) return; // Prevent duplicate
+
       this.addTopicBtn = document.createElement("button");
       this.addTopicBtn.id = "add-topic-btn";
       this.addTopicBtn.style.backgroundColor = "#101112";
+      this.addTopicBtn.style.display = "none"; // Initially hidden
       this.addTopicBtn.className =
         "primary-btn px-4 py-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50";
       this.addTopicBtn.textContent = "+ Add Topic";
@@ -467,126 +482,570 @@ if (!window.historyManagerInitialized) {
       );
     }
 
+    injectDrawerStyles() {
+      if (document.getElementById("mp-topic-drawer-style")) return;
+      const style = document.createElement("style");
+      style.id = "mp-topic-drawer-style";
+      style.textContent = `
+      .mp-topic-drawer-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.30); z-index: 99998; transition: opacity 0.3s;
+      }
+      .mp-topic-drawer {
+        position: fixed; top: 0; right: 0; width: 460px; height: 100vh; background: #fff;
+        box-shadow: rgba(0,0,0,0.1) -2px 0px 5px; z-index: 99999;
+        display: flex; flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+      }
+      .mp-drawer-open { transform: translateX(0); }
+      .mp-drawer-closed { transform: translateX(100%); }
+      .mp-topic-drawer-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 15px; border-bottom: 1px solid #e5e7eb;
+        position: relative;
+      }
+      .mp-topic-drawer-logo-title { display: flex; align-items: center; gap: 6px; }
+      .mp-topic-drawer-logo { width: 36px; height: 36px; border-radius: 6px; }
+      .mp-topic-drawer-title { font-size: 2rem; font-weight: 700; color: #22223b; letter-spacing: -0.5px; }
+      .mp-topic-drawer-subtitle { font-size: 1.4rem; color: #666; margin-top: 2px; }
+      .mp-topic-drawer-close {
+        background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px;
+        position: absolute; top: 12px; right: 12px; z-index: 2;
+        width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s;
+      }
+      .mp-topic-drawer-close:hover { background: #f3f4f6; }
+      .mp-topic-drawer-close svg { width: 22px; height: 22px; color: #222; }
+      .mp-topic-drawer-main {
+        flex: 1; overflow-y: auto; padding:0px 15px; display: flex; flex-direction: column; gap: 4px;
+      }
+      .mp-topic-drawer-section { margin-bottom: 8px; }
+      .mp-topic-drawer-label { 
+        font-size: 14px; font-weight: 600; color: #333; margin-top: 6px; margin-bottom: 2px; display: block;
+      }
+      .mp-topic-drawer-sublabel {
+        font-size: 12px; color: #666; margin-bottom: 5px; display: block; line-height: 1.4;
+      }
+      .mp-topic-drawer-input,
+      .mp-topic-drawer-select {
+        width: 100%; padding:5px 10px; border: 1px solid #ddd; border-radius: 6px;
+        font-size: 14px; color: #333; background: #fff;
+        margin-bottom: 10px;
+      }
+      .mp-topic-drawer-textarea {
+        width: 100%; padding: 8px;
+        border: 1px solid #ddd; border-radius: 6px;
+        font-size: 14px; line-height: 1.5;
+        resize: vertical;
+        margin-bottom: 10px;
+      }
+      .mp-topic-drawer-textarea.large {
+        min-height: 180px;
+      }
+      .mp-topic-drawer-textarea.medium {
+        min-height: 100px;
+      }
+      .mp-topic-drawer-textarea.small {
+        min-height: 80px;
+      }
+      .mp-topic-drawer-footer {
+        padding: 12px 24px;
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        gap: 8px;
+        background: #fff;
+        justify-content: flex-end;
+      }
+      .mp-topic-drawer-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        min-width: 100px;
+        transition: all 0.2s;
+      }
+      .mp-topic-drawer-btn-primary {
+        background: #000;
+        color: #fff;
+        border: none;
+      }
+      .mp-topic-drawer-btn-primary:hover {
+        background: #333;
+      }
+      .mp-topic-drawer-btn-secondary {
+        background: #fff;
+        color: #333;
+        border: 1px solid #ddd;
+      }
+      .mp-topic-drawer-btn-secondary:hover {
+        background: #f5f5f5;
+        border-color: #ccc;
+      }
+    `;
+      document.head.appendChild(style);
+    }
+
     showAddTopicPopover() {
-      // Remove existing popover if any
-      if (this.addTopicPopover) {
-        this.addTopicPopover.remove();
-      }
-      // Create popover/modal
-      this.addTopicPopover = document.createElement("div");
-      this.addTopicPopover.className =
-        "fixed inset-0 flex items-center justify-center z-50";
-      this.addTopicPopover.style.background = "rgba(0,0,0,0.2)";
-      this.addTopicPopover.innerHTML = `
-        <div class="bg-white rounded-lg shadow-lg p-4 w-full max-w-md relative">
-          <button class="absolute top-2 right-2 text-gray-500 hover:text-gray-700" id="close-add-topic-popover" title="Close" style="background:none;border:none;font-size:1.5rem;">&times;</button>
-          <h2 class="text-lg font-bold mb-4">Add Topic</h2>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Workspace</label>
-            <select id="add-topic-board-select" class="w-full border rounded p-2"></select>
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Keyword</label>
-            <input type="text" id="add-topic-keyword" class="w-full border rounded p-2" placeholder="Enter keyword" />
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm font-medium mb-1">Prompt</label>
-            <textarea id="add-topic-prompt" class="w-full border rounded p-2" rows="8"></textarea>
-          </div>
-          <div style="text-align: right;">
+      this.injectDrawerStyles();
 
-          <button id="save-add-topic-btn" style="background-color: #101112" class="primary-btn px-4 py-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">Save</button>
-      </div>
-          </div>
-      `;
-      document.body.appendChild(this.addTopicPopover);
+      // Remove existing drawer if any
+      let existingDrawer = document.querySelector(".mp-topic-drawer");
+      if (existingDrawer) existingDrawer.remove();
 
-      // Populate boards select
-      const boardSelect = this.addTopicPopover.querySelector(
-        "#add-topic-board-select"
-      );
-      if (boardSelect) {
-        boardSelect.innerHTML = this.boards.length
-          ? this.boards
-              .map(
-                (b) =>
-                  `<option value="${b.business_id}">${b.business_title}</option>`
-              )
-              .join("")
-          : '<option value="">No workspaces found</option>';
-      }
-      // Set default prompt
-      const promptArea =
-        this.addTopicPopover.querySelector("#add-topic-prompt");
-      if (promptArea) {
-        // Try both window.DEFAULT_SETTINGS.userPrompt and window.DEFAULT_SETTINGS["userPrompt"]
-        let defaultPrompt = "";
-        if (DEFAULT_SETTINGS) {
-          defaultPrompt =
-            DEFAULT_SETTINGS.userPrompt || DEFAULT_SETTINGS["userPrompt"] || "";
+      let existingOverlay = document.querySelector(".mp-topic-drawer-overlay");
+      if (existingOverlay) existingOverlay.remove();
+
+      // Create overlay
+      const overlayDiv = document.createElement("div");
+      overlayDiv.className = "mp-topic-drawer-overlay";
+      overlayDiv.style.opacity = "0";
+      overlayDiv.onclick = () => {
+        if (window.location.hash === "#topic-create") {
+          window.location.hash = "#topic";
         }
-        promptArea.value = defaultPrompt;
-      }
+        closeDrawer();
+      };
+
+      // Create drawer
+      const drawer = document.createElement("div");
+      drawer.className = "mp-topic-drawer mp-drawer-closed";
+
+      // Header
+      const header = document.createElement("div");
+      header.className = "mp-topic-drawer-header";
+
+      // Logo and title
+      const logoTitle = document.createElement("div");
+      logoTitle.className = "mp-topic-drawer-logo-title";
+      const logo = document.createElement("img");
+      logo.src = chrome.runtime.getURL("assets/logo_48.png");
+      logo.alt = "ManagePlus Logo";
+      logo.className = "mp-topic-drawer-logo";
+      const title = document.createElement("div");
+      title.innerHTML = `
+      <div class="mp-topic-drawer-title" style="font-size: 1rem;">Add New Topic</div>
+      <div class="mp-topic-drawer-subtitle" style="font-size:14px;">Add your topic to do engagement</div>
+    `;
+      logoTitle.appendChild(logo);
+      logoTitle.appendChild(title);
 
       // Close button
-      this.addTopicPopover
-        .querySelector("#close-add-topic-popover")
-        .addEventListener("click", () => {
-          this.addTopicPopover.remove();
-        });
+      const closeBtn = document.createElement("button");
+      closeBtn.className = "mp-topic-drawer-close";
+      closeBtn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6L14 14M14 6L6 14" stroke="#222" stroke-width="2" stroke-linecap="round"/></svg>`;
+      closeBtn.onclick = closeDrawer;
 
-      // Save button
-      this.addTopicPopover
-        .querySelector("#save-add-topic-btn")
-        .addEventListener("click", async () => {
-          const selectedBid = boardSelect.value;
-          const keyword = this.addTopicPopover
-            .querySelector("#add-topic-keyword")
-            .value.trim();
-          const prompt = promptArea.value;
-          if (!selectedBid || !keyword || !prompt) {
-            showNotification("All fields are required.", "error");
-            return;
+      header.appendChild(logoTitle);
+      header.appendChild(closeBtn);
+      drawer.appendChild(header);
+
+      // Main content
+      const main = document.createElement("div");
+      main.className = "mp-topic-drawer-main";
+
+      // 1. Workspace Selection
+      const workspaceLabel = document.createElement("label");
+      workspaceLabel.textContent = "Select Workspace";
+      workspaceLabel.className = "mp-topic-drawer-label";
+
+      const workspaceSelect = document.createElement("select");
+      workspaceSelect.className = "mp-topic-drawer-select";
+      workspaceSelect.id = "add-topic-board-select";
+      console.log("Workspace select element:", this.boards);
+      populateBoards(workspaceSelect, this.boards);
+
+      // 2. List Selection
+      const listLabel = document.createElement("label");
+      listLabel.textContent = "Select List";
+      listLabel.className = "mp-topic-drawer-label";
+      const listSubLabel = document.createElement("span");
+      listSubLabel.className = "mp-topic-drawer-sublabel";
+      listSubLabel.textContent =
+        "Select a list to save the engaged users in CRM for better organization and tracking";
+
+      const listSelect = document.createElement("select");
+      listSelect.className = "mp-topic-drawer-select";
+      listSelect.id = "add-topic-contact-type";
+
+      // Function to populate contact types
+      const fetchContactTypes = async (businessId) => {
+        if (!this.token) {
+          this.token = await getAuthToken();
+        }
+        try {
+          const response = await fetch(
+            `${APIURL}/segmentation/list?type=1&show_intent=false&page_no=1&rows_per_page=100`,
+            {
+              headers: {
+                Authorization: `Bearer ${this.token}`,
+                "b-id": businessId,
+              },
+            }
+          );
+          if (!response.ok) throw new Error("Failed to fetch contact types");
+          const data = await response.json();
+          return data.data?.rows || [];
+        } catch (error) {
+          console.error("Error fetching contact types:", error);
+          throw error;
+        }
+      };
+
+      // Function to populate contact types in select
+      async function populateContactTypes(businessId) {
+        if (!businessId) return;
+
+        try {
+          const contactTypes = await fetchContactTypes(businessId);
+
+          // Get keywords from input for default option
+          const keywords = keywordsInput.value.trim();
+          const defaultListName = keywords
+            ? `Linkedin-${keywords}`
+            : "Linkedin-default";
+
+          // Clear and add default option
+          listSelect.innerHTML = `<option value="default">${defaultListName}</option>`;
+
+          // Add existing lists
+          contactTypes.forEach((type) => {
+            const option = document.createElement("option");
+            option.value = type._id;
+            option.textContent = type.name;
+            listSelect.appendChild(option);
+          });
+        } catch (error) {
+          console.error("Failed to fetch contact types:", error);
+          showNotification("Failed to load lists", "error");
+        }
+      }
+
+      // Update list options when workspace changes
+      workspaceSelect.addEventListener("change", () => {
+        const selectedWorkspace = workspaceSelect.value;
+        populateContactTypes(selectedWorkspace);
+      });
+
+      // 3. Topic Keyword Field
+      const keywordsLabel = document.createElement("label");
+      keywordsLabel.textContent = "Topic Keyword *";
+      keywordsLabel.className = "mp-topic-drawer-label";
+      const keywordsSubLabel = document.createElement("span");
+      keywordsSubLabel.className = "mp-topic-drawer-sublabel";
+      keywordsSubLabel.textContent =
+        "Enter topic keyword on which you want to perform engagement in LinkedIn posts (one topic at a time)";
+      const keywordsInput = document.createElement("input");
+      keywordsInput.type = "text";
+      keywordsInput.id = "add-topic-keyword";
+      keywordsInput.className = "mp-topic-drawer-input";
+      keywordsInput.placeholder = "Example: email marketing";
+
+      // Update default list name when keywords change
+      keywordsInput.addEventListener("input", () => {
+        if (workspaceSelect.value) {
+          populateContactTypes(workspaceSelect.value);
+        }
+      });
+
+      // Initial population if workspace is selected
+      if (workspaceSelect.value) {
+        populateContactTypes(workspaceSelect.value);
+      }
+
+      // 3. Goal Prompt
+      const goalLabel = document.createElement("label");
+      goalLabel.textContent = "Business Goal *";
+      goalLabel.className = "mp-topic-drawer-label";
+      const goalSubLabel = document.createElement("span");
+      goalSubLabel.className = "mp-topic-drawer-sublabel";
+      goalSubLabel.textContent =
+        "Define your goal to determine which posts to engage with based on your target audience";
+
+      const goalTextarea = document.createElement("textarea");
+      goalTextarea.className = "mp-topic-drawer-textarea small";
+      goalTextarea.id = "add-topic-goal";
+      goalTextarea.placeholder =
+        "Example: find people who are hiring email marketers";
+      goalTextarea.rows = 3;
+
+      // 4. Engagement Type Checkboxes
+      const engagementTypeLabel = document.createElement("label");
+      engagementTypeLabel.textContent = "Engagement Type";
+      engagementTypeLabel.className = "mp-topic-drawer-label";
+
+      const engagementTypeSubLabel = document.createElement("span");
+      engagementTypeSubLabel.className = "mp-topic-drawer-sublabel";
+      engagementTypeSubLabel.textContent =
+        "Choose engagement types you want to perform with this topic";
+
+      const checkboxContainer = document.createElement("div");
+      checkboxContainer.style.cssText = `
+      display: flex;
+      gap: 24px;
+      margin-bottom: 10px;
+    `;
+
+      function createCheckbox(id, text) {
+        const wrapper = document.createElement("div");
+        wrapper.style.cssText = `display: flex; gap: 8px; align-items: center;`;
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.id = id;
+        checkbox.checked = true;
+        checkbox.style.cssText = `width: 16px; height: 16px; margin: 0; cursor: pointer;`;
+
+        const label = document.createElement("label");
+        label.htmlFor = id;
+        label.textContent = text;
+        label.style.cssText = `font-size: 14px; color: #374151; cursor: pointer; user-select: none;`;
+
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(label);
+        return wrapper;
+      }
+
+      checkboxContainer.appendChild(createCheckbox("engagementLike", "Like"));
+      checkboxContainer.appendChild(
+        createCheckbox("engagementComment", "Comment")
+      );
+      checkboxContainer.appendChild(
+        createCheckbox("engagementConnect", "Connect")
+      );
+
+      // 5. Comment Engagement Prompt
+      const promptLabel = document.createElement("label");
+      promptLabel.textContent = "Comment Engagement Prompt *";
+      promptLabel.className = "mp-topic-drawer-label";
+      const promptSubLabel = document.createElement("span");
+      promptSubLabel.className = "mp-topic-drawer-sublabel";
+      promptSubLabel.textContent =
+        "This is the engagement prompt that AI will use to generate comments";
+
+      const promptTextarea = document.createElement("textarea");
+      promptTextarea.className = "mp-topic-drawer-textarea large";
+      promptTextarea.id = "add-topic-prompt";
+
+      let defaultPrompt = "";
+      if (DEFAULT_SETTINGS) {
+        defaultPrompt =
+          DEFAULT_SETTINGS.userPrompt || DEFAULT_SETTINGS["userPrompt"] || "";
+      }
+      promptTextarea.value = defaultPrompt;
+
+      // 6. Profile Connection Prompt
+      const profilePromptLabel = document.createElement("label");
+      profilePromptLabel.textContent = "Profile Connection Prompt (Optional)";
+      profilePromptLabel.className = "mp-topic-drawer-label";
+      const profilePromptSubLabel = document.createElement("span");
+      profilePromptSubLabel.className = "mp-topic-drawer-sublabel";
+      profilePromptSubLabel.textContent =
+        "Optional: Define criteria for connection requests";
+
+      const profilePromptTextarea = document.createElement("textarea");
+      profilePromptTextarea.className = "mp-topic-drawer-textarea medium";
+      profilePromptTextarea.id = "add-topic-profile-prompt";
+      profilePromptTextarea.placeholder =
+        "Example: Connect with professionals in digital marketing";
+
+      // Append all elements to main
+      main.appendChild(workspaceLabel);
+      main.appendChild(workspaceSelect);
+      main.appendChild(listLabel);
+      main.appendChild(listSubLabel);
+      main.appendChild(listSelect);
+      main.appendChild(keywordsLabel);
+      main.appendChild(keywordsSubLabel);
+      main.appendChild(keywordsInput);
+      main.appendChild(goalLabel);
+      main.appendChild(goalSubLabel);
+      main.appendChild(goalTextarea);
+      main.appendChild(engagementTypeLabel);
+      main.appendChild(engagementTypeSubLabel);
+      main.appendChild(checkboxContainer);
+      main.appendChild(promptLabel);
+      main.appendChild(promptSubLabel);
+      main.appendChild(promptTextarea);
+      main.appendChild(profilePromptLabel);
+      main.appendChild(profilePromptSubLabel);
+      main.appendChild(profilePromptTextarea);
+
+      drawer.appendChild(main);
+
+      // Footer
+      const footer = document.createElement("div");
+      footer.className = "mp-topic-drawer-footer";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.className = "mp-topic-drawer-btn mp-topic-drawer-btn-secondary";
+      cancelBtn.onclick = closeDrawer;
+
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "Save";
+      saveBtn.className = "mp-topic-drawer-btn mp-topic-drawer-btn-primary";
+
+      // Function to create new contact type
+      const createContactType = async (businessId, name) => {
+        if (!this.token) {
+          this.token = await getAuthToken();
+        }
+        const response = await fetch(`${APIURL}/segmentation`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.token}`,
+            "b-id": businessId,
+          },
+          body: JSON.stringify({
+            name: name,
+            type: 1,
+          }),
+        });
+        if (!response.ok) throw new Error("Failed to create new list");
+        const data = await response.json();
+        return data.data;
+      };
+
+      saveBtn.onclick = async () => {
+        const selectedWorkspace = workspaceSelect.value;
+        const selectedList = document.getElementById(
+          "add-topic-contact-type"
+        ).value;
+        const keywords = keywordsInput.value.trim();
+        const goal = goalTextarea.value.trim();
+        const prompt = promptTextarea.value.trim();
+        const profilePrompt = profilePromptTextarea.value.trim();
+        const like = document.getElementById("engagementLike").checked;
+        const comment = document.getElementById("engagementComment").checked;
+        const connect = document.getElementById("engagementConnect").checked;
+
+        if (!selectedWorkspace) {
+          showNotification("Please select a workspace", "error");
+          return;
+        }
+        if (!selectedList) {
+          showNotification("Please select a list", "error");
+          return;
+        }
+        if (!keywords) {
+          showNotification("Keywords are required", "error");
+          return;
+        }
+        if (!goal) {
+          showNotification("Business Goal is required", "error");
+          return;
+        }
+        if (!prompt) {
+          showNotification("Comment Engagement Prompt is required", "error");
+          return;
+        }
+        if (!like && !comment && !connect) {
+          showNotification(
+            "Please select at least one engagement type",
+            "error"
+          );
+          return;
+        }
+
+        try {
+          saveBtn.disabled = true;
+          saveBtn.textContent = "Saving...";
+
+          // Create new list if default is selected
+          let contactTypeId = selectedList;
+          if (selectedList === "default") {
+            try {
+              const newContactType = await createContactType(
+                selectedWorkspace,
+                `Linkedin-${keywords}`
+              );
+              contactTypeId = newContactType._id;
+            } catch (err) {
+              throw new Error(
+                "Failed to create new list: " + (err.message || "Unknown error")
+              );
+            }
           }
-          // Build URL
+
+          // Build URL with the keywords
           const url = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
-            keyword
+            keywords
           )}&origin=SWITCH_SEARCH_VERTICAL`;
-          // Get linkedin profile id
-          const lkdn_profile_id = this.sessionId;
-          if (!lkdn_profile_id) {
-            showNotification("Session ID not found.", "error");
-            return;
-          }
-          // Prepare payload
-          const payload = {
-            url,
-            lkdn_profile_id,
-            prompt,
-          };
-          // Get token
+
           if (!this.token) {
             this.token = await getAuthToken();
           }
-          // Call API
-          try {
-            const response = await fetch(`${APIURL}/linkedin-topic`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${this.token}`,
-                "b-id": selectedBid,
-              },
-              body: JSON.stringify(payload),
-            });
-            if (!response.ok) throw new Error("Failed to add topic");
-            showNotification("Topic added successfully!", "success");
-            this.addTopicPopover.remove();
-            await this.fetchAndDisplayTopics();
-          } catch (err) {
-            showNotification("Error adding topic.", "error");
-          }
+
+          const payload = {
+            url,
+            lkdn_profile_id: this.sessionId,
+            prompt,
+            goal_prompt: goal,
+            profile_prompt: profilePrompt || null,
+            engagement_types: { like, comment, connect },
+            segment_id: contactTypeId,
+          };
+          const response = await fetch(`${APIURL}/linkedin-topic`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${this.token}`,
+              "b-id": selectedWorkspace,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) throw new Error("Failed to add topic");
+
+          showNotification("Topic added successfully!", "success");
+          closeDrawer();
+          await this.fetchAndDisplayTopics(selectedWorkspace);
+        } catch (err) {
+          showNotification(
+            "Error adding topic: " + (err.message || "Unknown error"),
+            "error"
+          );
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save";
+        }
+      };
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(saveBtn);
+      drawer.appendChild(footer);
+
+      // Add overlay and drawer to document
+      document.body.appendChild(overlayDiv);
+      document.body.appendChild(drawer);
+
+      // Function to close drawer
+      function closeDrawer() {
+        drawer.classList.remove("mp-drawer-open");
+        drawer.classList.add("mp-drawer-closed");
+        overlayDiv.style.opacity = "0";
+
+        // Update URL hash when closing drawer
+        if (window.location.hash === "#topic-create") {
+          window.location.hash = "#topic";
+        }
+
+        setTimeout(() => {
+          drawer.remove();
+          overlayDiv.remove();
+        }, 300);
+      }
+
+      // Animate drawer in after a short delay
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          drawer.classList.remove("mp-drawer-closed");
+          drawer.classList.add("mp-drawer-open");
+          overlayDiv.style.opacity = "1";
         });
+      });
     }
 
     async initializeIfNeeded() {
@@ -594,36 +1053,69 @@ if (!window.historyManagerInitialized) {
         this.titleElement.textContent = "Topic List";
       }
       if (!this.topicsContainer) return;
+
       this.topicsContainer.innerHTML = `<p class='text-gray-500'>Loading topics...</p>`;
+
+      // Initially hide UI elements until we verify token
+      if (this.addTopicBtn) this.addTopicBtn.style.display = "none";
+      if (this.workspaceSelect) this.workspaceSelect.style.display = "none";
+      if (this.topicTabBoardSelectLabel)
+        this.topicTabBoardSelectLabel.style.display = "none";
+
       await this.loadSessionIdAndBoards();
     }
 
     async loadSessionIdAndBoards() {
       try {
+        // First try to get the token
+        if (!this.token) {
+          try {
+            this.token = await getAuthToken();
+          } catch (error) {
+            console.log("No token available:", error);
+            // Hide UI elements when no token
+            if (this.addTopicBtn) this.addTopicBtn.style.display = "none";
+            if (this.workspaceSelect)
+              this.workspaceSelect.style.display = "none";
+            if (this.topicTabBoardSelectLabel)
+              this.topicTabBoardSelectLabel.style.display = "none";
+
+            renderLoginRequiredUI(
+              this.topicsContainer,
+              "Login Required",
+              "To view your engagement activity, please login to your ManagePlus account.",
+              "Login to ManagePlus"
+            );
+            return;
+          }
+        }
+
+        // If we have a token, show the UI elements
+        if (this.addTopicBtn) this.addTopicBtn.style.display = "block";
+        if (this.workspaceSelect) this.workspaceSelect.style.display = "block";
+        if (this.topicTabBoardSelectLabel)
+          this.topicTabBoardSelectLabel.style.display = "block";
+
+        // Get user info from storage
         const storage = await chrome.storage.local.get(["user_info"]);
         const userInfo = storage.user_info;
-        if (!this.token) {
-          this.addTopicBtn.style.display = "none"; // Hide button until token is fetched
-          this.workspaceSelect.style.display = "none"; // Hide select until token is fetched
-          this.topicTabBoardSelectLabel.style.display = "none"; // Hide label until token is fetched
-          renderLoginRequiredUI(
-            this.topicsContainer,
-            "Login Required",
-            "To view your engagement activity, please login to your ManagePlus account.",
-            "Login to ManagePlus"
-          );
-        }
-        this.addTopicBtn.style.display = "block"; // Hide button until token is fetched
-        this.workspaceSelect.style.display = "block"; // Hide select until token is fetched
-        this.topicTabBoardSelectLabel.style.display = "block"; // Hide label until token is fetched
+
         if (!userInfo) {
           this.topicsContainer.innerHTML = `<p class='text-red-500'>Session ID not found. Please login.</p>`;
           return;
         }
+
         this.sessionId = userInfo;
         await this.fetchAndPopulateBoards();
       } catch (err) {
-        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading session ID.</p>`;
+        console.error("Error in loadSessionIdAndBoards:", err);
+        // Hide UI elements on error
+        if (this.addTopicBtn) this.addTopicBtn.style.display = "none";
+        if (this.workspaceSelect) this.workspaceSelect.style.display = "none";
+        if (this.topicTabBoardSelectLabel)
+          this.topicTabBoardSelectLabel.style.display = "none";
+
+        this.topicsContainer.innerHTML = `<p class='text-red-500'>Error loading session data.</p>`;
       }
     }
 
@@ -632,22 +1124,43 @@ if (!window.historyManagerInitialized) {
         if (!this.token) {
           this.token = await getAuthToken();
         }
+
         const response = await fetch(`${APIURL}/user/me`, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
+
         if (!response.ok) throw new Error("Failed to fetch workspaces");
+
         const data = await response.json();
-        this.boards = data.data.businesses || [];
+        this.boards = data || [];
         this.populateBoardsSelect(this.boards);
+
         // Auto-select first board if available
-        if (this.boards.length > 0) {
-          this.workspaceSelect.value = this.boards[0]?.business_id;
-          this.currentBusinessId = this.boards[0].business_id;
-          await this.fetchAndDisplayTopics();
+        if (this.boards) {
+          populateBoards(this.workspaceSelect, this.boards);
+          // Optionally auto-select the first workspace
+          // this.selectedWorkspace = this.boards[0]?.business_id;
+          // this.currentBusinessId = this.boards[0].business_id;
+          const defaultWorkspace = this.boards.data?.businesses[0]?.business_id;
+          await this.fetchAndDisplayTopics(defaultWorkspace);
         } else {
           this.topicsContainer.innerHTML = `<p class='text-gray-500'>No workspaces found.</p>`;
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error("Error fetching boards:", err);
+        // Hide UI elements if fetching fails due to auth issues
+        if (this.addTopicBtn) this.addTopicBtn.style.display = "none";
+        if (this.workspaceSelect) this.workspaceSelect.style.display = "none";
+        if (this.topicTabBoardSelectLabel)
+          this.topicTabBoardSelectLabel.style.display = "none";
+
+        renderLoginRequiredUI(
+          this.topicsContainer,
+          "Login Required",
+          "To access and manage your topic lists, you need to login to your ManagePlus account. Please login to continue",
+          "Login to ManagePlus"
+        );
+      }
     }
 
     populateBoardsSelect(boards) {
@@ -662,23 +1175,25 @@ if (!window.historyManagerInitialized) {
         : '<option value="">No workspaces found</option>';
     }
 
-    async fetchAndDisplayTopics() {
+    async fetchAndDisplayTopics(bid) {
       if (!this.token) {
         this.token = await getAuthToken();
       }
-      if (!this.sessionId || !this.currentBusinessId) {
+      const businessBid = bid || this.currentBusinessId;
+      console.log("Fetching topics for business ID:", businessBid);
+      console.log("Current session ID:", this.sessionId);
+      console.log("Current session ID:", bid);
+      if (!this.sessionId || !businessBid) {
         this.topicsContainer.innerHTML = `<p class='text-gray-500'>Select a workspace to view topics.</p>`;
         return;
       }
       try {
         const url = `${APIURL}/linkedin-topic/list?lkdn_profile_id=${encodeURIComponent(
           this.sessionId
-        )}&rows_per_page=100&page_no=1&order_by=desc&business_id=${
-          this.currentBusinessId
-        }`;
+        )}&rows_per_page=100&page_no=1&order_by=desc&business_id=${businessBid}`;
         const response = await fetch(url, {
           headers: {
-            "b-id": this.currentBusinessId,
+            "b-id": businessBid,
             Authorization: `Bearer ${this.token}`,
           },
         });
@@ -698,52 +1213,96 @@ if (!window.historyManagerInitialized) {
         return;
       }
       this.topicsContainer.innerHTML = `
-      <div class="topic-list-wrapper">
-        ${topics
-          .map(
-            (topic) => `
+    <div class="topic-list-wrapper">
+      ${topics
+        .map((topic) => {
+          // Extract keywords from URL
+          const url = new URL(topic.url);
+          const keywords = url.searchParams.get("keywords") || "No keywords";
+
+          // Parse engagement types
+          const engagementTypes = topic.engagement_types || {};
+          const engagementBadges = [];
+
+          if (engagementTypes.like) {
+            engagementBadges.push(
+              '<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Like</span>'
+            );
+          }
+          if (engagementTypes.comment) {
+            engagementBadges.push(
+              '<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Comment</span>'
+            );
+          }
+          if (engagementTypes.connect) {
+            engagementBadges.push(
+              '<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">Connect</span>'
+            );
+          }
+
+          return `
               <div class="topic-item bg-white p-3 rounded-lg border border-gray-200 mb-2">
-                <div class="flex justify-between items-center">
-                  <div>
-                    <h3 class="font-medium text-gray-900">${
-                      topic.url || "Unnamed Topic"
-                    }</h3>
-                    <p class="text-xs text-gray-500">${
-                      topic.created_at
-                        ? new Date(topic.created_at).toLocaleString()
-                        : ""
-                    }</p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm text-gray-600">${
-                      topic.status || ""
-                    }</span>
-                    <button class="delete-topic-btn" title="Delete Topic" data-topic-id="${
-                      topic._id
-                    }" data-business-id="${
-              topic.business_id
-            }" style="background: none; border: none; cursor: pointer;">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                <div class="flex justify-between items-start">
+                  <div class="flex-grow">
+                    <div class="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 class="font-medium text-gray-900 mb-1">Keywords: ${keywords}</h3>
+                        <p class="text-xs text-gray-500">${
+                          topic.created_at
+                            ? new Date(topic.created_at).toLocaleString()
+                            : ""
+                        }</p>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm text-gray-600">${
+                          topic.status || ""
+                        }</span>
+                        <button class="delete-topic-btn" title="Delete Topic" data-topic-id="${
+                          topic._id
+                        }" data-business-id="${
+            topic.business_id
+          }" style="background: none; border: none; cursor: pointer;">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2 mb-3">
+                      ${engagementBadges.join("")}
+                    </div>
+
+                    <div class="space-y-2">
+                      <p class="text-sm text-gray-700">
+                        <span class="font-medium text-black">Business Goal:</span><br/>
+                        ${topic.goal_prompt || "No goal specified"}
+                      </p>
+                      
+                      <p class="text-sm text-gray-700">
+                        <span class="font-medium text-black">Comment Engagement Prompt:</span><br/>
+                        ${topic.prompt || "No prompt specified"}
+                      </p>
+                      
+                      ${
+                        topic.profile_prompt
+                          ? `
+                        <p class="text-sm text-gray-700">
+                          <span class="font-medium text-black">Profile Connection Prompt:</span><br/>
+                          ${topic.profile_prompt}
+                        </p>
+                      `
+                          : ""
+                      }
+                    </div>
                   </div>
                 </div>
-      <p class="text-sm text-gray-700 mt-1" >
-  <span style="font-weight: bold; color: black;">Engagement Prompt:</span> ${
-    topic.prompt || "No description"
-  }
-</p>
-<p class="text-sm text-gray-700 mt-1" >
-  <span style="font-weight: bold; color: black;">Business Goal:</span> ${
-    topic.goal_prompt || "No goal prompt"
-  }
-</p>
-
               </div>
-            `
-          )
-          .join("")}
-      </div>
-    `;
+            `;
+        })
+        .join("")}
+    </div>
+  `;
       // Add delete event listeners
       this.topicsContainer
         .querySelectorAll(".delete-topic-btn")
@@ -772,12 +1331,13 @@ if (!window.historyManagerInitialized) {
         });
         if (!response.ok) throw new Error("Failed to delete topic");
         showNotification("Topic deleted successfully!", "success");
-        await this.fetchAndDisplayTopics();
+        await this.fetchAndDisplayTopics(businessId);
       } catch (err) {
         showNotification("Error deleting topic.", "error");
       }
     }
   }
+
   // --- List Segment Management Class ---
   class ListSegmentManager {
     constructor() {

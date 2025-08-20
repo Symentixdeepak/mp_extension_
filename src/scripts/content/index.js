@@ -342,7 +342,9 @@ async function scanPosts() {
 
       const hasEngaged = await tracker.getPostById(postId);
       if (hasEngaged) {
-        // If already engaged, redirect to feed and stop further processing
+        await new Promise((resolve) =>
+          setTimeout(resolve, getRandomDelay(20000, 30000))
+        ); // If already engaged, redirect to feed and stop further processing
         window.location.href = "https://www.linkedin.com/feed/";
         return;
       }
@@ -408,7 +410,9 @@ async function scanPosts() {
       if (likePostEnabled) {
         await handleLikePost(post);
       }
-
+      await new Promise((resolve) =>
+        setTimeout(resolve, getRandomDelay(20000, 30000))
+      );
       await postComment(post, generatedComment);
       engagedPosts++;
     } catch (error) {
@@ -861,6 +865,9 @@ async function engageWithFirstScannedPost() {
 
         const hasEngaged = await tracker.getPostById(postId);
         if (hasEngaged) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, getRandomDelay(25000, 30000))
+          );
           // If already engaged, redirect to feed and stop further processing
           window.location.href = "https://www.linkedin.com/feed/";
           return;
@@ -940,39 +947,41 @@ if (document.readyState === "loading") {
     // Quick win: URL extraction
     const urlMatch = window.location.href.match(/\/in\/([^\/\?#]+)/);
     if (urlMatch) return urlMatch[1];
-    
+
     // Search code tags with profile data
-    const codeTags = document.querySelectorAll('code');
-    
+    const codeTags = document.querySelectorAll("code");
+
     for (let codeTag of codeTags) {
       const content = codeTag.textContent;
-      
+
       // Skip empty or small content
       if (!content || content.length < 50) continue;
-      
+
       // Look for LinkedIn profile indicators
-      if (content.includes('publicIdentifier') && 
-          (content.includes('MiniProfile') || content.includes('fs_miniProfile'))) {
-        
+      if (
+        content.includes("publicIdentifier") &&
+        (content.includes("MiniProfile") || content.includes("fs_miniProfile"))
+      ) {
         try {
           const data = JSON.parse(content);
-          
+
           // Method A: Check included array
           if (data.included && Array.isArray(data.included)) {
             for (let item of data.included) {
-              if (item.publicIdentifier && 
-                  item.$type && 
-                  item.$type.includes('MiniProfile')) {
+              if (
+                item.publicIdentifier &&
+                item.$type &&
+                item.$type.includes("MiniProfile")
+              ) {
                 return item.publicIdentifier;
               }
             }
           }
-          
+
           // Method B: Direct property check
           if (data.publicIdentifier) {
             return data.publicIdentifier;
           }
-          
         } catch (parseError) {
           // Fallback: regex extraction
           const match = content.match(/"publicIdentifier":\s*"([^"]+)"/);
@@ -980,7 +989,7 @@ if (document.readyState === "loading") {
         }
       }
     }
-    
+
     return null;
   }
 

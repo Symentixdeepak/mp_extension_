@@ -28,6 +28,7 @@ module.exports = (env, argv) => {
     topicList: "./src/scripts/content/topicList.js",
     profile: "./src/scripts/content/profile.js",
     topicButton: "./src/scripts/content/topicButton.js",
+    viewProspect: "./src/scripts/content/viewProspect.js",
   },
     output: {
       filename: "js/[name].js",
