@@ -18,6 +18,7 @@ const {
   getSecChUaMobile,
   getSecChUaHeader,
 } = require("../../utils/utils");
+const { logger } = require("../../utils/logger");
 
 const minDelay = 3000;
 const maxDelay = 4000;
@@ -412,6 +413,8 @@ async function callApi(config) {
 // NEW: Analyze profile against user criteria
 async function analyzeProfileMatch(userQuery) {
   try {
+    logger.profileAnalysis.start('Starting profile analysis', { userQuery });
+
     // Extract profile data
     const { firstName, lastName } = getFirstLastName();
     const jobTitle = getJobTitle();
@@ -422,9 +425,23 @@ async function analyzeProfileMatch(userQuery) {
     const hasAbout = about && about.trim().length > 0;
     const hasName = firstName && firstName.trim().length > 0;
 
+    logger.info('PROFILE_DATA_EXTRACTION', 'Profile data extracted', {
+      hasName,
+      hasJobTitle,
+      hasAbout,
+      firstName,
+      lastName,
+      jobTitle: hasJobTitle ? jobTitle : 'N/A',
+      aboutLength: hasAbout ? about.length : 0
+    }, 'profile.js');
+
     // If no meaningful data is available, return 0
     if (!hasName && !hasJobTitle && !hasAbout) {
-      console.log("No meaningful profile data found for analysis");
+      logger.profileAnalysis.error('No meaningful profile data found for analysis', {
+        hasName,
+        hasJobTitle,
+        hasAbout
+      });
       return 0;
     }
 
@@ -455,6 +472,12 @@ Provide a match analysis with percentage and reasoning.`;
 
     const serverUrl = `${APIURL}/ai/chat`;
 
+    logger.chatGPT.start('Sending profile analysis request to AI', {
+      url: serverUrl,
+      promptLength: userPrompts.length,
+      model: 'llama3.1:latest'
+    });
+
     const data = await callApi({
       action: "API_POST_GENERATE_MESSAGE",
       url: serverUrl,
@@ -462,10 +485,17 @@ Provide a match analysis with percentage and reasoning.`;
       body,
     });
 
-    console.log("Profile analysis response:", data);
+    logger.chatGPT.success('Profile analysis response received', {
+      hasData: !!data,
+      hasError: !!data?.error,
+      dataKeys: data ? Object.keys(data) : []
+    });
 
     if (data.error) {
-      console.error("Profile analysis API error:", data.error);
+      logger.chatGPT.error('Profile analysis API error', {
+        error: data.error,
+        fullResponse: data
+      });
       return 0;
     }
 
@@ -478,19 +508,30 @@ Provide a match analysis with percentage and reasoning.`;
       analysisResult.toLowerCase().trim() === "null" ||
       analysisResult.trim().length === 0
     ) {
-      console.log("Profile analysis returned NULL or invalid result");
+      logger.profileAnalysis.error('Profile analysis returned NULL or invalid result', {
+        analysisResult,
+        resultType: typeof analysisResult,
+        resultLength: analysisResult ? analysisResult.length : 0
+      });
       return 0;
     }
 
     // Extract percentage from the analysis result
     const matchPercentage = extractPercentage(analysisResult);
 
-    console.log("Profile analysis result:", analysisResult);
-    console.log("Extracted match percentage:", matchPercentage);
+    logger.profileAnalysis.success('Profile analysis completed successfully', {
+      matchPercentage,
+      analysisResult: analysisResult.substring(0, 200) + '...',
+      fullResultLength: analysisResult.length
+    });
 
     return matchPercentage;
   } catch (error) {
-    console.error("Error analyzing profile match:", error);
+    logger.profileAnalysis.error('Error analyzing profile match', {
+      error: error.message,
+      stack: error.stack,
+      userQuery
+    });
     return 0;
   }
 }
@@ -637,13 +678,25 @@ async function makeActivityApiCall(
   message = null
 ) {
   try {
+    logger.activityAPI.start('Starting activity API call', {
+      engagementType,
+      hasMessage: !!message,
+      message: message ? message.substring(0, 50) + '...' : null,
+      topicEngDataKeys: topicEngData ? Object.keys(topicEngData) : []
+    });
+
     // Validate that we have the required data
     if (
       !topicEngData.business_id ||
       !topicEngData.topic_id ||
       !topicEngData.contact_id
     ) {
-      console.log("Missing required topic engagement data:", topicEngData);
+      logger.activityAPI.error('Missing required topic engagement data', {
+        topicEngData,
+        hasBusinessId: !!topicEngData.business_id,
+        hasTopicId: !!topicEngData.topic_id,
+        hasContactId: !!topicEngData.contact_id
+      });
       throw new Error("Missing required topic engagement data");
     }
 
@@ -661,19 +714,32 @@ async function makeActivityApiCall(
       payload.message = message;
     }
 
+    logger.info('ACTIVITY_API_PAYLOAD', 'Activity API payload prepared', {
+      payload,
+      payloadSize: JSON.stringify(payload).length
+    }, 'profile.js');
+
     await chrome.runtime.sendMessage({
       action: "MAKE_ACTIVITY_API_CALL",
       payload: payload,
     });
 
-    console.log(
-      `Activity API call completed successfully with type: ${engagementType}${
-        message ? " with message" : ""
-      }`
-    );
+    logger.activityAPI.success('Activity API call completed successfully', {
+      engagementType,
+      hasMessage: !!message,
+      businessId: topicEngData.business_id,
+      contactId: topicEngData.contact_id
+    });
+
     return true;
   } catch (error) {
-    console.log("Error making activity API call:", error);
+    logger.activityAPI.error('Error making activity API call', {
+      error: error.message,
+      stack: error.stack,
+      engagementType,
+      hasMessage: !!message,
+      topicEngData
+    });
     throw error;
   }
 }
@@ -681,13 +747,21 @@ async function makeActivityApiCall(
 // Main function to update contact
 async function updateContactAction() {
   try {
+    logger.profileAction.start('Starting contact update action', {
+      url: window.location.href,
+      timestamp: new Date().toISOString()
+    });
+
     // Helper function to safely get values
     const safeGetValue = (fn, fieldName) => {
       try {
         const value = fn();
         return value || "";
       } catch (error) {
-        console.log(`Failed to get ${fieldName}:`, error);
+        logger.warn('SAFE_GET_VALUE_FAILED', `Failed to get ${fieldName}`, {
+          fieldName,
+          error: error.message
+        }, 'profile.js');
         return "";
       }
     };
@@ -705,6 +779,21 @@ async function updateContactAction() {
     const experience = safeGetValue(getExperience, "experience");
     const skills = safeGetValue(getSkills, "skills");
 
+    logger.info('CONTACT_DATA_EXTRACTED', 'Contact data extraction completed', {
+      hasFirstName: !!firstName,
+      hasLastName: !!lastName,
+      hasAddress: !!address,
+      hasJobTitle: !!jobTitle,
+      hasAvatar: !!avatar,
+      hasAbout: !!about,
+      hasEducation: !!education,
+      hasExperience: !!experience,
+      hasSkills: !!skills,
+      aboutLength: about ? about.length : 0,
+      educationLength: education ? education.length : 0,
+      experienceLength: experience ? experience.length : 0
+    }, 'profile.js');
+
     // Create summary JSON object (only include non-empty values)
     const summaryData = {};
     if (about) summaryData.about = about;
@@ -718,10 +807,15 @@ async function updateContactAction() {
 
     // Validate that we have the required data
     if (!topicEngData.business_id || !topicEngData.contact_id) {
-      console.log("Missing required topic engagement data:", topicEngData);
+      logger.profileAction.error('Missing required topic engagement data', {
+        topicEngData,
+        hasBusinessId: !!topicEngData.business_id,
+        hasContactId: !!topicEngData.contact_id
+      });
       throw new Error("Missing required topic engagement data");
     }
-
+    
+    const currentPageUrl = getCurrentProfileUrl();
     const contactData = {
       address: address,
       jobTitle: jobTitle,
@@ -729,28 +823,38 @@ async function updateContactAction() {
       contact_id: topicEngData.contact_id,
       business_id: topicEngData.business_id,
       summary: summary,
+      linkedinProfile: currentPageUrl,
     };
 
-    // Log what data was successfully collected
-    console.log("Successfully collected data:", {
-      address: !!address,
-      jobTitle: !!jobTitle,
-      avatar: !!avatar,
-      about: !!about,
-      education: !!education,
-      experience: !!experience,
-      skills: !!skills,
-    });
+    logger.info('CONTACT_UPDATE_PAYLOAD', 'Contact update payload prepared', {
+      contactId: topicEngData.contact_id,
+      businessId: topicEngData.business_id,
+      hasAddress: !!address,
+      hasJobTitle: !!jobTitle,
+      hasAvatar: !!avatar,
+      summaryLength: summary.length,
+      linkedinProfile: currentPageUrl
+    }, 'profile.js');
 
     await chrome.runtime.sendMessage({
       action: "UPDATE_CONTACT_ACTION",
       data: contactData,
     });
 
-    console.log("Contact update completed successfully", contactData);
+    logger.profileAction.success('Contact update completed successfully', {
+      contactId: topicEngData.contact_id,
+      businessId: topicEngData.business_id,
+      dataFields: Object.keys(contactData),
+      summaryLength: summary.length
+    });
+    
     return true;
   } catch (error) {
-    console.log("Error updating contact:", error);
+    logger.profileAction.error('Error updating contact', {
+      error: error.message,
+      stack: error.stack,
+      url: window.location.href
+    });
     throw error;
   }
 }
@@ -763,7 +867,14 @@ async function fetchProfileApi(vanityName, csrfToken) {
   const xLiLang = getXLiLang();
   const acceptLanguage = getAcceptLanguage();
   const xLiTrackHeader = getXLiTrackHeader();
+  
   try {
+    logger.profileAction.fetchStart('Starting LinkedIn profile API fetch', {
+      vanityName,
+      hasCsrfToken: !!csrfToken,
+      url: window.location.href
+    });
+
     const response = await fetch(
       `https://www.linkedin.com/voyager/api/graphql?includeWebMetadata=true&variables=(vanityName:${vanityName})&queryId=voyagerIdentityDashProfiles.ee32334d3bd69a1900a077b5451c646a`,
       {
@@ -797,11 +908,23 @@ async function fetchProfileApi(vanityName, csrfToken) {
     );
 
     if (!response.ok) {
+      logger.profileAction.fetchError('Profile API request failed', {
+        status: response.status,
+        statusText: response.statusText,
+        vanityName,
+        url: response.url
+      });
       throw new Error(`Profile API failed with status: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log("Profile API response:", data);
+    
+    logger.profileAction.fetchSuccess('Profile API response received', {
+      hasData: !!data,
+      dataKeys: data ? Object.keys(data) : [],
+      vanityName,
+      responseSize: JSON.stringify(data).length
+    });
 
     // Extract member profile ID
     const memberProfile =
@@ -809,12 +932,27 @@ async function fetchProfileApi(vanityName, csrfToken) {
         "*elements"
       ]?.[0];
     if (!memberProfile) {
+      logger.profileAction.fetchError('Member profile not found in API response', {
+        data,
+        vanityName,
+        dataStructure: data?.data?.data ? Object.keys(data.data.data) : 'No data.data'
+      });
       throw new Error("Member profile not found in response");
     }
 
+    logger.profileAction.fetchSuccess('Member profile extracted successfully', {
+      memberProfileId: memberProfile,
+      vanityName
+    });
+
     return memberProfile;
   } catch (error) {
-    console.log("Error fetching profile:", error);
+    logger.profileAction.fetchError('Error fetching profile', {
+      error: error.message,
+      stack: error.stack,
+      vanityName,
+      hasCsrfToken: !!csrfToken
+    });
     throw error;
   }
 }
@@ -833,6 +971,13 @@ async function sendConnectionRequest(
   const xLiTrackHeader = getXLiTrackHeader();
 
   try {
+    logger.connectionRequest.start('Starting connection request', {
+      memberProfileId,
+      hasCustomMessage: !!customMessage,
+      customMessage: customMessage ? customMessage.substring(0, 50) + '...' : null,
+      hasCsrfToken: !!csrfToken
+    });
+
     // Prepare the request body
     const requestBody = {
       invitee: {
@@ -848,6 +993,11 @@ async function sendConnectionRequest(
     } else {
       requestBody.customMessage = "";
     }
+
+    logger.info('CONNECTION_REQUEST_PAYLOAD', 'Request payload prepared', {
+      requestBody,
+      bodySize: JSON.stringify(requestBody).length
+    }, 'profile.js');
 
     const response = await fetch(
       "https://www.linkedin.com/voyager/api/voyagerRelationshipsDashMemberRelationships?action=verifyQuotaAndCreateV2&decorationId=com.linkedin.voyager.dash.deco.relationships.InvitationCreationResultWithInvitee-2",
@@ -882,79 +1032,121 @@ async function sendConnectionRequest(
     );
 
     if (!response.ok) {
+      logger.connectionRequest.error('Connection request failed', {
+        status: response.status,
+        statusText: response.statusText,
+        memberProfileId,
+        hasCustomMessage: !!customMessage
+      });
       throw new Error(
         `Connection request failed with status: ${response.status}`
       );
     }
 
     const data = await response.json();
-    console.log("Connection request sent successfully:", data);
+    
+    logger.connectionRequest.success('Connection request sent successfully', {
+      memberProfileId,
+      hasCustomMessage: !!customMessage,
+      customMessage: customMessage ? customMessage.substring(0, 100) : null,
+      responseData: data,
+      responseKeys: data ? Object.keys(data) : []
+    });
+
     return true;
   } catch (error) {
-    console.log("Error sending connection request:", error);
+    logger.connectionRequest.error('Error sending connection request', {
+      error: error.message,
+      stack: error.stack,
+      memberProfileId,
+      hasCustomMessage: !!customMessage,
+      customMessage
+    });
     throw error;
   }
 }
 
 // Handle redirect after error or completion
 async function handleRedirect() {
+  logger.info('HANDLE_REDIRECT', 'Starting redirect process', {
+    currentUrl: window.location.href,
+    timestamp: new Date().toISOString()
+  }, 'profile.js');
+
   await setToChromeStorage("topic_eng_data", {});
+  
+  const randomTopicUrl = await getRandomTopicUrl();
+  
+  logger.info('REDIRECT_PREPARED', 'Redirect prepared with random topic URL', {
+    randomTopicUrl,
+    minDelay,
+    maxDelay,
+    clearedTopicEngData: true
+  }, 'profile.js');
 
   chrome.runtime.sendMessage({
     action: "DELAYED_FEED_REDIRECT",
     minDelay,
     maxDelay,
-    url: await getRandomTopicUrl(),
+    url: randomTopicUrl,
   });
+
+  logger.success('REDIRECT_MESSAGE_SENT', 'Redirect message sent to background', {
+    url: randomTopicUrl,
+    minDelay,
+    maxDelay
+  }, 'profile.js');
 }
 
-let commentsPosted = 0;
-let postsLiked = 0;
-let postsScanned = 0;
 let connectionSent = 0;
 // Main initialization function with profile analysis and improved delays
 async function initializeProfile() {
-  const data = await chrome.storage.local.get([
-    "commentsPosted",
-    "postsLiked",
-    "postsScanned",
-    "connectionSent",
-  ]);
+  logger.info('INITIALIZE_PROFILE', 'Profile initialization started', {
+    url: window.location.href,
+    timestamp: new Date().toISOString(),
+    readyState: document.readyState
+  }, 'profile.js');
+
+  const data = await chrome.storage.local.get(["connectionSent"]);
   const today = new Date().toDateString();
   if (data.lastResetDate !== today) {
     chrome.storage.local.set({
-      commentsPosted: 0,
-      postsScanned: 0,
-      postsLiked: 0,
       connectionSent: 0,
       lastResetDate: today,
     });
-    commentsPosted = 0;
-    postsScanned = 0;
-    postsLiked = 0;
+
     connectionSent = 0;
+    logger.info('CONNECTION_STATS_RESET', 'Connection stats reset for new day', {
+      today,
+      previousDate: data.lastResetDate
+    }, 'profile.js');
   } else {
-    commentsPosted = data.commentsPosted || 0;
-    postsScanned = data.postsScanned || 0;
-    postsLiked = data.postsLiked || 0;
     connectionSent = data.connectionSent || 0;
+    logger.info('CONNECTION_STATS_LOADED', 'Connection stats loaded', {
+      connectionSent,
+      lastResetDate: data.lastResetDate
+    }, 'profile.js');
   }
 
   function updateStats() {
     chrome.storage.local.set({
-      commentsPosted: commentsPosted,
-      postsScanned: postsScanned,
-      postsLiked: postsLiked,
       connectionSent: connectionSent,
     });
   }
+  
   try {
-    console.log("Profile.js initializing...");
+    logger.info('INITIALIZATION_CHECKS', 'Starting initialization checks', {}, 'profile.js');
+    
     const statusData = await chrome.storage.local.get(["engagement_status"]);
     const engagementStatus = statusData.engagement_status;
     const isFeedCommenterActive = await chrome.storage.local.get([
       "topic_commenter_active",
     ]);
+
+    logger.info('STATUS_CHECK', 'Status check completed', {
+      engagementStatus,
+      topicCommenterActive: isFeedCommenterActive?.topic_commenter_active
+    }, 'profile.js');
 
     // Wait for page to be fully loaded
     await randomSleep(2, 4);
@@ -963,6 +1155,10 @@ async function initializeProfile() {
       engagementStatus === "started" ||
       !isFeedCommenterActive?.topic_commenter_active
     ) {
+      logger.warn('INITIALIZATION_STOPPED', 'Initialization stopped due to status conditions', {
+        engagementStatus,
+        topicCommenterActive: isFeedCommenterActive?.topic_commenter_active
+      }, 'profile.js');
       return;
     }
 
@@ -979,11 +1175,13 @@ async function initializeProfile() {
     const shouldComment = engagementTypes.comment === true;
     const shouldConnect = engagementTypes.connect === true;
 
-    console.log("Engagement types:", {
+    logger.info('ENGAGEMENT_TYPES', 'Engagement types extracted', {
       shouldLike,
       shouldComment,
       shouldConnect,
-    });
+      hasTopicEngData: !!topicEngData,
+      topicEngDataKeys: Object.keys(topicEngData)
+    }, 'profile.js');
 
     // Initialize userPrompt from storage if available
     let userPrompt = "";
@@ -994,11 +1192,12 @@ async function initializeProfile() {
     // Get current page URL
     const currentPageUrl = getCurrentProfileUrl();
 
-    console.log("Current page URL:", currentPageUrl);
-    console.log(
-      "Poster profile URL from storage:",
-      topicEngData.posterProfileUrl
-    );
+    logger.info('URL_COMPARISON', 'URL comparison data', {
+      currentPageUrl,
+      posterProfileUrl: topicEngData.posterProfileUrl,
+      hasUserPrompt: !!userPrompt,
+      userPromptLength: userPrompt.length
+    }, 'profile.js');
 
     // NEW: Check if current URL contains /in/ - if not, handle redirect
     if (!currentPageUrl.includes("/in/")) {
@@ -1220,14 +1419,14 @@ async function initializeProfile() {
               "connectionsent",
               customMessage
             );
-            updateStats();
             connectionSent++;
+            updateStats();
             console.log("Activity API call made with custom message");
           } else {
             // Don't pass message if connection was sent without custom message
             await makeActivityApiCall(topicEngData, "connectionsent");
-            updateStats();
             connectionSent++;
+            updateStats();
             console.log("Activity API call made without message");
           }
         } catch (error) {

@@ -489,3 +489,111 @@
 
   /* Remove default popup button background override (no more default black) */
   /* Keep secondary-btn, text-btn, and btn-no as before */
+
+/* Card Animation Keyframes */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Counter Animation */
+@keyframes countUp {
+  from {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.counter-animate {
+  animation: countUp 0.6s ease-out;
+}
+
+/* Stats Card Hover Effects */
+.stats-card:hover .stats-icon {
+  transform: scale(1.1) rotate(5deg);
+}
+
+/* Progress Bar Animations */
+@keyframes progressShine {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.progress-shine {
+  animation: progressShine 2s infinite;
+}
+
+/* Pulse Animation for Live Indicator */
+@keyframes livePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.live-indicator {
+  animation: livePulse 2s infinite;
+}
+
+/* Number Counter Animation Effect */
+@keyframes numberPop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.number-update {
+  animation: numberPop 0.4s ease-out;
+}
+
+/* Gradient Progress Animation */
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.gradient-animate {
+  background-size: 200% 200%;
+  animation: gradientShift 3s ease infinite;
+}
+
+/* Smooth hover transitions for cards */
+.feature-card {
+  will-change: transform, box-shadow;
+}
+
+.feature-card:active {
+  transform: translateY(-1px) scale(1.01) !important;
+  transition: transform 0.1s ease-out;
+}

@@ -874,44 +874,108 @@ const { APIURL } = require("../../utils/constant");
 (async function () {
   let hasChecked = false;
 
+  // Function to check if we're on the logged-in user's own profile
+  function isOwnProfile() {
+    // Method 1: Check for profile edit buttons that only appear on own profile
+    const editButtons = [
+      '[aria-label*="edit" i][aria-label*="profile" i]',
+      '[data-control-name*="edit_profile"]',
+      '.pv-s-profile-actions--edit',
+      '.artdeco-button[aria-label*="Edit"]',
+      '[data-view-name*="profile-edit"]'
+    ];
+    
+    for (const selector of editButtons) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via edit button:", selector);
+        return true;
+      }
+    }
+
+    // Method 2: Check URL patterns that indicate own profile
+    const currentUrl = window.location.href;
+    
+    // Profile settings/edit pages
+    if (currentUrl.includes('/public-profile/settings') || 
+        currentUrl.includes('/me/profile-views') ||
+        currentUrl.includes('/mypreferences') ||
+        currentUrl.includes('/profile/edit')) {
+      console.log("✅ Own profile detected via settings/edit URL");
+      return true;
+    }
+
+    // Method 3: Look for "View profile" menu that typically appears on own profile
+    const viewProfileElements = [
+      '[data-control-name="view_profile"]',
+      '[href*="/public-profile/settings"]',
+      '.pv-s-profile-actions [href*="public-profile"]'
+    ];
+    
+    for (const selector of viewProfileElements) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via view profile element:", selector);
+        return true;
+      }
+    }
+
+    // Method 4: Check for profile visibility settings that only appear on own profile
+    const profileSettingsIndicators = [
+      '[data-control-name*="public_profile"]',
+      '.pv-profile-section__see-more-inline',
+      '.pv-profile-header__visibility-dropdown'
+    ];
+
+    for (const selector of profileSettingsIndicators) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via settings indicator:", selector);
+        return true;
+      }
+    }
+
+    console.log("❌ Not on own profile - this appears to be someone else's profile");
+    return false;
+  }
+
   // Function to extract LinkedIn vanity name from DOM
   function extractLinkedInVanityName() {
     // Quick win: URL extraction
     const urlMatch = window.location.href.match(/\/in\/([^\/\?#]+)/);
     if (urlMatch) return urlMatch[1];
-    
+
     // Search code tags with profile data
-    const codeTags = document.querySelectorAll('code');
-    
+    const codeTags = document.querySelectorAll("code");
+
     for (let codeTag of codeTags) {
       const content = codeTag.textContent;
-      
+
       // Skip empty or small content
       if (!content || content.length < 50) continue;
-      
+
       // Look for LinkedIn profile indicators
-      if (content.includes('publicIdentifier') && 
-          (content.includes('MiniProfile') || content.includes('fs_miniProfile'))) {
-        
+      if (
+        content.includes("publicIdentifier") &&
+        (content.includes("MiniProfile") || content.includes("fs_miniProfile"))
+      ) {
         try {
           const data = JSON.parse(content);
-          
+
           // Method A: Check included array
           if (data.included && Array.isArray(data.included)) {
             for (let item of data.included) {
-              if (item.publicIdentifier && 
-                  item.$type && 
-                  item.$type.includes('MiniProfile')) {
+              if (
+                item.publicIdentifier &&
+                item.$type &&
+                item.$type.includes("MiniProfile")
+              ) {
                 return item.publicIdentifier;
               }
             }
           }
-          
+
           // Method B: Direct property check
           if (data.publicIdentifier) {
             return data.publicIdentifier;
           }
-          
         } catch (parseError) {
           // Fallback: regex extraction
           const match = content.match(/"publicIdentifier":\s*"([^"]+)"/);
@@ -919,18 +983,24 @@ const { APIURL } = require("../../utils/constant");
         }
       }
     }
-    
+
     return null;
   }
 
-  // Check and update user_info only if not already stored
+  // Check and update user_info only if we're on the logged-in user's own profile
   function checkAndUpdateUserInfo() {
     if (hasChecked) return; // Don't check again if already done
+
+    // IMPORTANT: Only extract user info if we're on the logged-in user's own profile
+    if (!isOwnProfile()) {
+      console.log("🚫 Skipping user_info extraction - not on own profile");
+      return;
+    }
 
     const vanityName = extractLinkedInVanityName();
     if (!vanityName) return;
 
-    console.log("🔍 Found vanity name:", vanityName);
+    console.log("🔍 Found vanity name on own profile:", vanityName);
 
     chrome.storage.local.get(["user_info"], (result) => {
       if (chrome.runtime.lastError) {
@@ -943,13 +1013,14 @@ const { APIURL } = require("../../utils/constant");
         chrome.storage.local.set({ user_info: vanityName }, () => {
           if (!chrome.runtime.lastError) {
             if (!result.user_info) {
-              console.log("✅ user_info saved:", vanityName);
+              console.log("✅ user_info saved (own profile):", vanityName);
             } else {
               console.log(
                 "🔄 user_info updated from",
                 result.user_info,
                 "to",
-                vanityName
+                vanityName,
+                "(own profile)"
               );
             }
             hasChecked = true; // Mark as checked so we don't do it again

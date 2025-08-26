@@ -759,6 +759,44 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
       );
     }, delay);
     return true;
+  } else if (request.action === "LOG_TO_BACKGROUND") {
+    // Handle centralized logging from content scripts
+    const { logEntry } = request;
+
+    // Create a formatted log message
+    const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
+    const logMessage = `[${timestamp}][${logEntry.source}][${logEntry.level}][${logEntry.action}] ${logEntry.message}`;
+
+    // Log to background console based on level
+    switch (logEntry.level) {
+      case "ERROR":
+        console.error(`🔴 ${logMessage}`, logEntry.data);
+        break;
+      case "WARN":
+        console.warn(`🟡 ${logMessage}`, logEntry.data);
+        break;
+      case "DEBUG":
+        console.debug(`🔍 ${logMessage}`, logEntry.data);
+        break;
+      default:
+        console.log(`ℹ️ ${logMessage}`, logEntry.data);
+    }
+
+    // Store logs in chrome storage for later retrieval (optional)
+    chrome.storage.local.get(["extension_logs"], (result) => {
+      const logs = result.extension_logs || [];
+      logs.push(logEntry);
+
+      // Keep only last 1000 log entries to prevent storage overflow
+      if (logs.length > 1000) {
+        logs.splice(0, logs.length - 1000);
+      }
+
+      chrome.storage.local.set({ extension_logs: logs });
+    });
+
+    sendResponse({ success: true });
+    return true;
   }
 
   // If the message is not handled by an async operation in this listener,
@@ -818,8 +856,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 body: JSON.stringify({
                   first_name: firstName,
                   mp_customer_linkedin_profile: mp_linkedinProfile,
-                  last_name: lastName,
-                  avatar: request.data.avatar || null, // Optional avatar
+                  last_name: lastName || null, // Optional last name
+
                   current_lifecycle_stage: lifecycleStageId, // Add lifecycle stage ID
                 }),
               }
@@ -908,7 +946,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             // Now create the contact with lifecycle stage
             const response = await fetch(
-              `${APIURL}/customer/${request.data.contact_id}`,
+              `${APIURL}/customer/${request.data.contact_id}?identifier=mp_customer_linkedin_profile`,
               {
                 method: "PUT",
                 headers: {
@@ -919,6 +957,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 body: JSON.stringify({
                   summary: request.data.summary || null, // Optional summary
                   job_title: request.data.jobTitle || null, // Optional job title
+                  mp_customer_linkedin_profile:
+                    request.data.linkedinProfile || null, // Optional LinkedIn profile
+
                   ["address.full_address"]: request.data.address || null, // Optional address
                   avatar: request.data.avatar || null, // Optional avatar
                 }),
@@ -1638,7 +1679,10 @@ function isLinkedInNonFeed(url) {
 function isLinkedInNonTopic(url) {
   return (
     url?.includes("linkedin.com/") &&
-    !url.includes("linkedin.com/search/results/content")
+    !url.includes("linkedin.com/search/results/content") &&
+    !url.includes("linkedin.com/feed/update") &&
+
+    !url.includes("linkedin.com/in/")
   );
 }
 
@@ -1748,9 +1792,17 @@ setInterval(() => {
                       const topicList = await fetchTopicList(sessionId);
                       redirectUrl = getRandomUrlFromTopicList(topicList);
 
-                      console.log(
-                        `User not on LinkedIn tab for >1min. Redirecting non-topic LinkedIn tab ${tabToRedirect.id} (${tabToRedirect.url}) to topic: ${redirectUrl}.`
-                      );
+                      // Fallback to feed if no topic URL available
+                      if (!redirectUrl) {
+                        redirectUrl = FEED_URL;
+                        console.log(
+                          `No topic URL found, falling back to feed. Redirecting non-topic LinkedIn tab ${tabToRedirect.id} (${tabToRedirect.url}) to feed.`
+                        );
+                      } else {
+                        console.log(
+                          `User not on LinkedIn tab for >1min. Redirecting non-topic LinkedIn tab ${tabToRedirect.id} (${tabToRedirect.url}) to topic: ${redirectUrl}.`
+                        );
+                      }
                     }
                   } else if (feed_commenter_active && !topic_commenter_active) {
                     // Feed commenter logic (only when feed is true AND topic is false)
@@ -1844,7 +1896,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         const sessionId = await getLinkedInSessionId();
         const topicList = await fetchTopicList(sessionId);
         redirectUrl = getRandomUrlFromTopicList(topicList);
-        console.log("Topic commenter active - will redirect to:", redirectUrl);
+
+        // Fallback to feed if no topic URL available
+        if (!redirectUrl) {
+          redirectUrl = "https://www.linkedin.com/feed/";
+          console.log(
+            "Topic commenter active - no topic URL found, falling back to feed:",
+            redirectUrl
+          );
+        } else {
+          console.log(
+            "Topic commenter active - will redirect to:",
+            redirectUrl
+          );
+        }
       } else if (feed_commenter_active && !topic_commenter_active) {
         // Feed commenter logic (only when feed is true AND topic is false)
         searchPattern = "https://www.linkedin.com/feed/";
@@ -1947,10 +2012,19 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
               const topicList = await fetchTopicList(sessionId);
               redirectUrl = getRandomUrlFromTopicList(topicList);
 
-              console.log(
-                "Topic commenter active - redirecting to:",
-                redirectUrl
-              );
+              // Fallback to feed if no topic URL available
+              if (!redirectUrl) {
+                redirectUrl = "https://www.linkedin.com/feed/";
+                console.log(
+                  "Topic commenter active - no topic URL found, falling back to feed:",
+                  redirectUrl
+                );
+              } else {
+                console.log(
+                  "Topic commenter active - redirecting to:",
+                  redirectUrl
+                );
+              }
             } else if (feed_commenter_active && !topic_commenter_active) {
               // Feed commenter logic (only when feed is true AND topic is false)
               redirectUrl = "https://www.linkedin.com/feed/";

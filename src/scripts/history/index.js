@@ -755,12 +755,12 @@ if (!window.historyManagerInitialized) {
 
       // 3. Goal Prompt
       const goalLabel = document.createElement("label");
-      goalLabel.textContent = "Business Goal *";
+      goalLabel.textContent = "Business Goal Prompt*";
       goalLabel.className = "mp-topic-drawer-label";
       const goalSubLabel = document.createElement("span");
       goalSubLabel.className = "mp-topic-drawer-sublabel";
       goalSubLabel.textContent =
-        "Define your goal to determine which posts to engage with based on your target audience";
+        "Your Business Goal Prompt: This prompt helps AI analyze posts before engagement. Only posts that match your business goal will be engaged with, ensuring targeted and relevant interactions.";
 
       const goalTextarea = document.createElement("textarea");
       goalTextarea.className = "mp-topic-drawer-textarea small";
@@ -836,12 +836,12 @@ if (!window.historyManagerInitialized) {
 
       // 6. Profile Connection Prompt
       const profilePromptLabel = document.createElement("label");
-      profilePromptLabel.textContent = "Profile Connection Prompt (Optional)";
+      profilePromptLabel.textContent = "Profile Connection Request Prompt (Optional)";
       profilePromptLabel.className = "mp-topic-drawer-label";
       const profilePromptSubLabel = document.createElement("span");
       profilePromptSubLabel.className = "mp-topic-drawer-sublabel";
       profilePromptSubLabel.textContent =
-        "Optional: Define criteria for connection requests";
+        "Smart Connection Filtering: AI will analyze user profiles (name, job title, about section) before sending connection requests. If criteria match, connection is sent. If empty, all connections are sent without filtering.";
 
       const profilePromptTextarea = document.createElement("textarea");
       profilePromptTextarea.className = "mp-topic-drawer-textarea medium";
@@ -3045,6 +3045,28 @@ ${
               <span class="text-xs text-gray-400 whitespace-nowrap">
                 ${new Date(
                   post.activity_data.content.post_comment_date
+                ).toLocaleTimeString()}
+              </span>
+            </div>
+          `
+              : ""
+          }
+          
+          ${
+            post?.activity_data?.content?.conn_req_sent
+              ? `
+            <div class="flex items-center space-x-3 text-sm">
+              <span class="flex items-center space-x-1 action-badge action-${"like"}">
+                <span>🤝</span><span>Connection Request Sent</span>
+              </span>
+              ${
+                post.activity_data.content.message
+                  ? `<p class="text-gray-600 text-sm">"${post.activity_data.content.message}"</p>`
+                  : ""
+              }
+              <span class="text-xs text-gray-400 whitespace-nowrap">
+                ${new Date(
+                  post.activity_data.content.conn_req_sent_date
                 ).toLocaleTimeString()}
               </span>
             </div>

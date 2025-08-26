@@ -49,6 +49,20 @@ module.exports = (env, argv) => {
           exclude: /node_modules/,
           use: {
             loader: "babel-loader",
+            options: {
+              plugins: [
+                ...(isProduction
+                  ? [
+                      [
+                        "transform-remove-console",
+                        {
+                          exclude: ["error"] // Keep console.error for production debugging
+                        }
+                      ]
+                    ]
+                  : []),
+              ],
+            },
           },
         },
         {

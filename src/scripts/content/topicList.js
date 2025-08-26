@@ -1,4 +1,5 @@
 const tracker = require("../../utils/engagement");
+const { logger } = require("../../utils/logger");
 const {
   getPostId,
   getPostUrl,
@@ -200,7 +201,6 @@ async function isCurrentPageManagedTopic() {
             console.log("Final result - isManaged:", isManaged);
 
             if (isManaged && managedTopic) {
-              // Update local storage with the topic ID
               const topicDataToSave = {
                 topic_id: managedTopic._id,
                 goal_prompt: managedTopic.goal_prompt,
@@ -209,15 +209,36 @@ async function isCurrentPageManagedTopic() {
                 profile_prompt: managedTopic.profile_prompt,
               };
 
-              // ✅ Only add engagement_types if it exists and is not null/undefined
               if (managedTopic.engagement_types) {
                 topicDataToSave.engagement_types =
                   managedTopic.engagement_types;
               }
 
-              updateLocalStorageObject("topic_eng_data", topicDataToSave);
+              // ✅ Clear old topic_eng_data first, then set new one
+              chrome.storage.local.set({ topic_eng_data: {} }, () => {
+                console.log(
+                  "[isCurrentPageManagedTopic] Cleared old topic_eng_data"
+                );
 
-              // Instead of updateLocalStorageObject calls, use chrome.storage.local.set
+                chrome.storage.local.set(
+                  { topic_eng_data: topicDataToSave },
+                  () => {
+                    if (chrome.runtime.lastError) {
+                      console.error(
+                        "[isCurrentPageManagedTopic] Storage error:",
+                        chrome.runtime.lastError
+                      );
+                    } else {
+                      console.log(
+                        "[isCurrentPageManagedTopic] ✅ topic_eng_data saved:",
+                        topicDataToSave
+                      );
+                    }
+                  }
+                );
+              });
+
+              // ✅ Save workspace + prompt too
               chrome.storage.local.set(
                 {
                   selected_workspace: managedTopic?.business_id,
@@ -226,12 +247,12 @@ async function isCurrentPageManagedTopic() {
                 () => {
                   if (chrome.runtime.lastError) {
                     console.error(
-                      "Chrome storage error:",
+                      "[isCurrentPageManagedTopic] Chrome storage error:",
                       chrome.runtime.lastError
                     );
                   } else {
                     console.log(
-                      "✅ Workspace and topic prompt saved successfully"
+                      "[isCurrentPageManagedTopic] ✅ Workspace and topic prompt saved successfully"
                     );
                   }
                 }
@@ -346,19 +367,16 @@ async function initialize() {
       chrome.storage.local.set({
         commentsPosted: 0,
         postsScanned: 0,
-        connectionSent: 0,
         postsLiked: 0,
         lastResetDate: today,
       });
       commentsPosted = 0;
       postsScanned = 0;
       postsLiked = 0;
-      connectionSent = 0; // Reset connections sent
     } else {
       commentsPosted = data.commentsPosted || 0;
       postsScanned = data.postsScanned || 0;
       postsLiked = data.postsLiked || 0;
-      connectionSent = data.connectionSent || 0; // Get connections sent
     }
 
     dailyLimit = data.dailyLimit || DEFAULT_SETTINGS.dailyLimit;
@@ -436,7 +454,13 @@ function getOriginFromUrl() {
 }
 
 async function fetchPostsFromAPI(start = 0, count = 3) {
-  console.log("Fetching posts from API...", start, count);
+  logger.info('FETCH_POSTS_START', 'Starting LinkedIn posts API fetch', {
+    start,
+    count,
+    timestamp: new Date().toISOString(),
+    url: window.location.href
+  }, 'topicList.js');
+
   const keywords = getKeywordsFromUrl();
   const origin = getOriginFromUrl();
   const dynamicQueryParams = buildDynamicQueryParams();
@@ -446,6 +470,13 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
   const xLiLang = getXLiLang();
   const acceptLanguage = getAcceptLanguage();
   const xLiTrackHeader = getXLiTrackHeader();
+
+  logger.debug('FETCH_POSTS_PARAMS', 'API parameters prepared', {
+    keywords: keywords.substring(0, 50) + (keywords.length > 50 ? '...' : ''),
+    origin,
+    dynamicQueryParamsCount: Object.keys(dynamicQueryParams).length,
+    hasSecHeaders: !!secChUaHeader
+  }, 'topicList.js');
 
   const variablesObj = {
     start,
@@ -471,10 +502,11 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
 
   const apiUrl = `https://www.linkedin.com/voyager/api/graphql?includeWebMetadata=true&variables=${finalVariables}&queryId=voyagerSearchDashClusters.5ba32757c00b31aea747c8bebb92855c`;
 
-  console.log("Generated URL:", apiUrl); // Debug log to verify
-
-  console.log("Generated variables string:", variablesString); // Debug log
-  console.log("API URL:", apiUrl); // Debug log
+  logger.debug('FETCH_POSTS_URL', 'API URL generated', {
+    apiUrl: apiUrl.substring(0, 200) + '...',
+    variablesLength: variablesString.length,
+    finalVariablesLength: finalVariables.length
+  }, 'topicList.js');
 
   const headers = {
     accept: "application/vnd.linkedin.normalized+json+2.1",
@@ -497,6 +529,12 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
   };
 
   try {
+    logger.debug('FETCH_POSTS_REQUEST', 'Making LinkedIn API request', {
+      method: 'GET',
+      hasHeaders: Object.keys(headers).length,
+      credentials: 'include'
+    }, 'topicList.js');
+
     const resp = await fetch(apiUrl, {
       method: "GET",
       headers,
@@ -505,16 +543,21 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
     });
 
     if (!resp.ok) {
-      console.log(
-        "LinkedIn API fetch posts failed:",
-        resp.status,
-        resp.statusText
-      );
+      logger.error('FETCH_POSTS_FAILED', 'LinkedIn API fetch posts failed', {
+        status: resp.status,
+        statusText: resp.statusText,
+        url: apiUrl.substring(0, 100) + '...'
+      }, 'topicList.js');
       return [];
     }
 
     const json = await resp.json();
-    console.log("Total posts fetched:", json);
+    logger.info('FETCH_POSTS_SUCCESS', 'Posts API response received', {
+      hasIncluded: !!json?.included,
+      includedLength: json?.included?.length || 0,
+      hasData: !!json?.data,
+      responseKeys: json ? Object.keys(json) : []
+    }, 'topicList.js');
 
     // Handle both search results and feed data
     let extractedPosts = [];
@@ -530,7 +573,10 @@ async function fetchPostsFromAPI(start = 0, count = 3) {
           el.summary // Has post content
       );
 
-      console.log("Search post elements found:", searchPostElements.length);
+      logger.info('SEARCH_POSTS_FOUND', 'Search post elements extracted', {
+        totalIncluded: json.included.length,
+        searchPostElements: searchPostElements.length
+      }, 'topicList.js');
 
       if (searchPostElements.length > 0) {
         extractedPosts = searchPostElements.map((el) => {
@@ -789,23 +835,46 @@ function checkPromotedPosts(post, className = null) {
 }
 
 async function createContactInBackground(contactData) {
-  console.log("Creating contact in background with data:", contactData);
+  logger.info('CREATE_CONTACT_START', 'Starting contact creation in background', {
+    hasContactData: !!contactData,
+    contactDataKeys: contactData ? Object.keys(contactData) : [],
+    name: contactData?.name,
+    email: contactData?.email,
+    company: contactData?.company
+  }, 'topicList.js');
+
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       { action: "createContact", data: contactData },
       (response) => {
         if (chrome.runtime.lastError) {
-          console.error(
-            "Chrome runtime error:",
-            chrome.runtime.lastError.message
-          );
+          logger.error('CONTACT_CREATE_RUNTIME_ERROR', 'Chrome runtime error during contact creation', {
+            error: chrome.runtime.lastError.message,
+            contactData
+          }, 'topicList.js');
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
-        console.log("Response from background:", response);
+        
+        logger.debug('CONTACT_CREATE_RESPONSE', 'Background response received', {
+          hasResponse: !!response,
+          success: response?.success,
+          hasData: !!response?.data,
+          error: response?.error
+        }, 'topicList.js');
+
         if (response?.success) {
+          logger.success('CONTACT_CREATE_SUCCESS', 'Contact created successfully', {
+            contactId: response.data?.data?.id || response.data?.data,
+            responseData: response.data?.data
+          }, 'topicList.js');
           resolve(response.data?.data);
         } else {
+          logger.error('CONTACT_CREATE_FAILED', 'Failed to create contact', {
+            error: response?.error || 'Unknown error',
+            response,
+            contactData
+          }, 'topicList.js');
           reject(new Error(response?.error || "Failed to create contact"));
         }
       }
@@ -814,11 +883,15 @@ async function createContactInBackground(contactData) {
 }
 
 // Scan for celebration posts
-// Scan for celebration posts
 async function scanPosts() {
+  console.log("[scanPosts] === START ===");
+
   const postContainers = document.querySelectorAll(SELECTORS.postList[0]);
+  console.log("[scanPosts] Found posts:", postContainers?.length || 0);
+
   if (!postContainers?.length) {
     showNotification("No posts found on this page.", "warning");
+    console.log("[scanPosts] No posts found, exiting");
     return;
   }
 
@@ -827,55 +900,86 @@ async function scanPosts() {
   isProcessing = true;
 
   for (const post of postContainers) {
+    console.log("[scanPosts] Processing post...");
+
     const initialUrlForPost = window.location.href;
+    let redirectUrl = null;
 
     try {
       const postId = getPostId(post);
-      if (!postId || lastProcessedPosts.has(postId)) continue;
+      console.log("[scanPosts] Post ID:", postId);
+
+      if (!postId) {
+        console.log("[scanPosts] No postId found, skipping");
+        continue;
+      }
+      if (lastProcessedPosts.has(postId)) {
+        console.log("[scanPosts] Already processed, skipping:", postId);
+        continue;
+      }
       lastProcessedPosts.add(postId);
       post.setAttribute("data-auto-commenter-processed", "true");
 
-      if (checkPromotedPosts(post)) continue;
+      if (checkPromotedPosts(post)) {
+        console.log("[scanPosts] Promoted post, skipping:", postId);
+        continue;
+      }
 
       const postContent = extractPostContent(post);
-      if (window.location.href !== initialUrlForPost) break;
+      console.log(
+        "[scanPosts] Extracted content:",
+        postContent?.substring(0, 80)
+      );
 
+      if (window.location.href !== initialUrlForPost) {
+        console.log("[scanPosts] URL changed, stopping");
+        break;
+      }
+
+      console.log("[scanPosts] Generating comment...");
       const loadingNotification = showNotification(
         "Generating comment...",
         "loading"
       );
       const generatedComment = await generateComment(postContent);
       if (loadingNotification) loadingNotification.closeNotification();
+      console.log("[scanPosts] Generated comment:", generatedComment);
 
-      let shouldPostComment = !!(
-        generatedComment && !generatedComment.includes("NULL")
-      );
-      if (!shouldPostComment) {
-        showNotification(
-          "Failed to generate comment, skipping comment step.",
-          "warning"
-        );
-      } else {
-        showNotification("Comment generated!", "success");
-      }
+      const shouldPostComment =
+        !!generatedComment && !generatedComment.includes("NULL");
+      console.log("[scanPosts] shouldPostComment =", shouldPostComment);
 
       const topicEngData = await getFromChromeStorage("topic_eng_data", {});
+      console.log("[scanPosts] topicEngData:", topicEngData);
 
-      // === UPDATED DEFAULT LOGIC ===
-      const engagementTypes = topicEngData?.engagement_types
-        ? topicEngData.engagement_types
-        : { like: true, comment: true, connect: true };
+      const engagementTypes = topicEngData?.engagement_types ?? {
+        like: true,
+        comment: true,
+        connect: true,
+      };
+      console.log("[scanPosts] Engagement types:", engagementTypes);
+      console.log("[scanPosts] Individual engagement checks:");
+      console.log("[scanPosts] - Like enabled:", engagementTypes.like);
+      console.log("[scanPosts] - Comment enabled:", engagementTypes.comment);
+      console.log("[scanPosts] - Connect enabled:", engagementTypes.connect);
 
-      if (!topicEngData?.list_id) return;
+      if (!topicEngData?.list_id) {
+        console.log(
+          "[scanPosts] No list_id found, redirecting to random topic"
+        );
+        redirectUrl = await getRandomTopicUrl();
+        break;
+      }
 
-      // Create Contact
-      const { firstName, lastName } = extractFirstAndLastName(post);
-      const mp_linkedinProfile = extractLinkedInProfile(post);
-      const avatarUrl = extractAvatarUrl(post);
-
-      let contactData;
+      // === Contact creation ===
+      let contactId = null;
       try {
-        contactData = await createContactInBackground({
+        console.log("[scanPosts] Creating contact...");
+        const { firstName, lastName } = extractFirstAndLastName(post);
+        const mp_linkedinProfile = extractLinkedInProfile(post);
+        const avatarUrl = extractAvatarUrl(post);
+
+        const contactData = await createContactInBackground({
           firstName,
           lastName,
           mp_linkedinProfile,
@@ -883,78 +987,179 @@ async function scanPosts() {
           avatar: avatarUrl,
         });
 
+        console.log("[scanPosts] Contact created:", contactData);
+        contactId = contactData._id;
+
         updateLocalStorageObject("topic_eng_data", {
-          contact_id: contactData.id || contactData._id,
+          contact_id: contactData._id,
           business_id: contactData.business_id,
           user_profile_url: mp_linkedinProfile,
           current_post_id: postId,
         });
       } catch (err) {
-        console.error("Failed to create contact:", err);
-        chrome.runtime.sendMessage({
-          action: "DELAYED_FEED_REDIRECT",
-          minDelay,
-          maxDelay,
-          url: await getRandomTopicUrl(),
-        });
-        continue;
-      }
-
-      // LIKE
-      if (engagementTypes.like) {
-        try {
-          await handleLikePost(post, contactData._id);
-        } catch (err) {
-          console.error("Like failed:", err);
-        }
-        await new Promise((res) =>
-          setTimeout(res, getRandomDelay(20000, 25000))
-        );
-      }
-
-      // COMMENT
-      if (engagementTypes.comment && shouldPostComment) {
-        try {
-          await new Promise((resolve) =>
-            setTimeout(resolve, getRandomDelay(20000, 30000))
-          );
-          await postComment(post, generatedComment, contactData.id);
-        } catch (err) {
-          console.error("Comment failed:", err);
-        }
-        await new Promise((res) => setTimeout(res, getRandomDelay(2000, 3000)));
-      }
-
-      // REDIRECT
-      let redirectUrl;
-      if (engagementTypes.connect) {
-        const posterProfileUrl = await extractLinkedInProfile(post);
-        updateLocalStorageObject("topic_eng_data", { posterProfileUrl });
-        redirectUrl = posterProfileUrl;
-      } else {
+        console.log("[scanPosts] [ERROR] Contact creation failed:", err);
         redirectUrl = await getRandomTopicUrl();
+        break;
       }
 
+      // === SEQUENTIAL ENGAGEMENTS ===
+      console.log("[scanPosts] Starting sequential engagements...");
+      
+      // === LIKE ===
+      if (engagementTypes.like) {
+        console.log("[scanPosts] START LIKE");
+        try {
+          await handleLikePost(post, contactId);
+          console.log("[scanPosts] LIKE SUCCESS");
+          await new Promise((res) =>
+            setTimeout(res, getRandomDelay(5000, 10000))
+          );
+        } catch (err) {
+          console.log("[scanPosts] [ERROR] Like failed:", err);
+        }
+        console.log("[scanPosts] END LIKE");
+      }
+
+      // === COMMENT ===
+      if (engagementTypes.comment && shouldPostComment) {
+        console.log("[scanPosts] START COMMENT");
+        try {
+          await new Promise((res) =>
+            setTimeout(res, getRandomDelay(8000, 15000))
+          );
+          await postComment(post, generatedComment, contactId);
+          console.log("[scanPosts] COMMENT SUCCESS");
+          await new Promise((res) =>
+            setTimeout(res, getRandomDelay(5000, 10000))
+          );
+        } catch (err) {
+          console.log("[scanPosts] [ERROR] Comment failed:", err);
+        }
+        console.log("[scanPosts] END COMMENT");
+      }
+
+      // === CONNECT / PROFILE VISIT ===
+      if (engagementTypes.connect) {
+        logger.info('PROFILE_VISIT_START', 'Starting profile visit process', {
+          postId: getPostId(post),
+          posterName: getPosterName(post),
+          engagementTypes
+        }, 'topicList.js');
+
+        try {
+          const posterProfileUrl = extractLinkedInProfile(post);
+          
+          logger.debug('POSTER_PROFILE_EXTRACTION', 'Extracted poster profile URL', {
+            posterProfileUrl,
+            hasProfileUrl: !!posterProfileUrl,
+            postId: getPostId(post),
+            posterName: getPosterName(post)
+          }, 'topicList.js');
+
+          if (posterProfileUrl) {
+            if (posterProfileUrl.includes("/in/")) {
+              // Only set redirect if it's a user profile
+              logger.success('VALID_USER_PROFILE', 'Valid user profile detected for redirect', {
+                posterProfileUrl,
+                postId: getPostId(post),
+                posterName: getPosterName(post)
+              }, 'topicList.js');
+
+              updateLocalStorageObject("topic_eng_data", { posterProfileUrl });
+              redirectUrl = posterProfileUrl;
+              
+              logger.info('PROFILE_REDIRECT_SET', 'Redirect set to user profile', {
+                redirectUrl,
+                postId: getPostId(post)
+              }, 'topicList.js');
+
+            } else {
+              // Fallback to random topic
+              logger.warn('NON_USER_PROFILE', 'Non-user profile detected (company/page)', {
+                posterProfileUrl,
+                postId: getPostId(post),
+                profileType: 'company/page'
+              }, 'topicList.js');
+
+              redirectUrl = await getRandomTopicUrl();
+              
+              logger.info('FALLBACK_REDIRECT', 'Redirecting to random topic due to non-user profile', {
+                originalProfileUrl: posterProfileUrl,
+                redirectUrl,
+                postId: getPostId(post)
+              }, 'topicList.js');
+            }
+          } else {
+            // No profile found, fallback
+            logger.warn('NO_PROFILE_EXTRACTED', 'No profile URL extracted from post', {
+              postId: getPostId(post),
+              posterName: getPosterName(post)
+            }, 'topicList.js');
+
+            redirectUrl = await getRandomTopicUrl();
+            
+            logger.info('NO_PROFILE_FALLBACK', 'Redirecting to random topic due to no profile', {
+              redirectUrl,
+              postId: getPostId(post)
+            }, 'topicList.js');
+          }
+        } catch (err) {
+          logger.error('PROFILE_VISIT_ERROR', 'Profile visit failed', {
+            error: err.message,
+            stack: err.stack,
+            postId: getPostId(post)
+          }, 'topicList.js');
+
+          redirectUrl = await getRandomTopicUrl();
+        }
+        console.log("[scanPosts] END PROFILE VISIT");
+      } else {
+        console.log("[scanPosts] SKIPPING PROFILE VISIT - Connect engagement is DISABLED");
+      }
+
+      // === Redirect fallback ===
+      if (!redirectUrl) {
+        console.log("[scanPosts] No redirect URL set, checking engagement types...");
+        
+        // If connect engagement was enabled but no redirectUrl was set, 
+        // something went wrong - set a fallback
+        if (engagementTypes.connect) {
+          console.log("[scanPosts] Connect engagement was enabled but no redirect URL, using fallback");
+          redirectUrl = await getRandomTopicUrl();
+        } else {
+          console.log("[scanPosts] No connect engagement enabled, using standard fallback");
+          redirectUrl = await getRandomTopicUrl();
+        }
+      }
+      
+      console.log("[scanPosts] Final redirect URL:", redirectUrl);
+      
+      // === ENGAGEMENT SUMMARY ===
+      console.log("[scanPosts] ENGAGEMENT SUMMARY:");
+      console.log(`[scanPosts] - Like: ${engagementTypes.like ? '✅ ENABLED' : '❌ DISABLED'}`);
+      console.log(`[scanPosts] - Comment: ${engagementTypes.comment ? '✅ ENABLED' : '❌ DISABLED'} ${shouldPostComment ? '(Comment generated)' : '(No comment/failed)'}`);
+      console.log(`[scanPosts] - Connect: ${engagementTypes.connect ? '✅ ENABLED' : '❌ DISABLED'} ${redirectUrl && redirectUrl.includes('/in/') ? '(Profile redirect)' : '(Random topic redirect)'}`);
+      console.log("[scanPosts] ===================");
+    } catch (error) {
+      console.log("[scanPosts] [ERROR] General post error:", error);
+      redirectUrl = await getRandomTopicUrl();
+    }
+
+    if (redirectUrl) {
+      console.log("[scanPosts] Sending redirect to:", redirectUrl);
       chrome.runtime.sendMessage({
         action: "DELAYED_FEED_REDIRECT",
         minDelay,
         maxDelay,
         url: redirectUrl,
       });
-    } catch (error) {
-      console.error("Error processing post:", error);
-      chrome.runtime.sendMessage({
-        action: "DELAYED_FEED_REDIRECT",
-        minDelay,
-        maxDelay,
-        url: await getRandomTopicUrl(),
-      });
     }
 
-    break; // process only one post
+    console.log("[scanPosts] === END (1 post processed) ===");
+    break;
   }
 
-  chrome.storage.local.set({ postsScanned });
+  chrome.storage.local.set({ postsScanned: postsScanned });
 }
 
 // Extract post content
@@ -1034,13 +1239,30 @@ async function generateGPTComment(postContent) {
 
 async function handleLikePost(post, contact_id) {
   try {
+    logger.info('LIKE_POST_START', 'Starting post like action', {
+      hasPost: !!post,
+      contactId: contact_id,
+      postId: getPostId(post),
+      postUrl: getPostUrl(post),
+      posterName: getPosterName(post)
+    }, 'topicList.js');
+
     const likeButton =
       post.querySelector(SELECTORS.likeButton[0]) ||
       post.querySelector(SELECTORS.likeButton[1]);
-
+      
     if (!likeButton) {
+      logger.warn('LIKE_BUTTON_NOT_FOUND', 'Like button not found for post', {
+        postId: getPostId(post),
+        selectors: SELECTORS.likeButton
+      }, 'topicList.js');
       return;
     }
+
+    logger.debug('LIKE_BUTTON_FOUND', 'Like button found, simulating click', {
+      postId: getPostId(post),
+      buttonText: likeButton.textContent?.trim()
+    }, 'topicList.js');
 
     simulateMouseClick(likeButton);
     await new Promise((resolve) =>
@@ -1049,34 +1271,73 @@ async function handleLikePost(post, contact_id) {
 
     // Get stored data from Chrome storage using the utility function
     const topicEngData = await getFromChromeStorage("topic_eng_data", {});
+    const contactTypeId = contact_id || topicEngData.contact_id;
+    
+    logger.debug('LIKE_POST_DATA', 'Topic engagement data retrieved', {
+      hasTopicEngData: !!topicEngData,
+      businessId: topicEngData.business_id,
+      topicId: topicEngData.topic_id,
+      contactTypeId,
+      hasLastActivityId: !!topicEngData?.last_activity_id
+    }, 'topicList.js');
 
     // Validate that we have the required data
-    if (!topicEngData.business_id || !topicEngData.topic_id || !contact_id) {
-      console.error("Missing required topic engagement data:", topicEngData);
+    if (!topicEngData.business_id || !topicEngData.topic_id || !contactTypeId) {
+      logger.error('LIKE_POST_MISSING_DATA', 'Missing required topic engagement data', {
+        hasBusinessId: !!topicEngData.business_id,
+        hasTopicId: !!topicEngData.topic_id,
+        hasContactId: !!contactTypeId,
+        topicEngData,
+        postId: getPostId(post)
+      }, 'topicList.js');
       return;
     }
+
+    const activityPayload = {
+      activityId: topicEngData?.last_activity_id,
+      businessId: topicEngData.business_id,
+      engagement_type: "like",
+      segmentId: topicEngData.topic_id,
+      customerId: contactTypeId,
+      posterName: getPosterName(post),
+      posterProfile: getPosterProfile(post),
+      postUrl: getPostUrl(post),
+      postId: getPostId(post),
+      isAutoPost: autoPostEnabled,
+    };
+
+    logger.activityAPI.start('Making like activity API call', {
+      engagementType: 'like',
+      postId: getPostId(post),
+      businessId: topicEngData.business_id,
+      customerId: contactTypeId,
+      posterName: getPosterName(post),
+      isAutoPost: autoPostEnabled
+    });
 
     // Make activity API call
     await chrome.runtime.sendMessage({
       action: "MAKE_ACTIVITY_API_CALL",
-      payload: {
-        activityId: topicEngData?.last_activity_id, // Use the new function here
-
-        businessId: topicEngData.business_id,
-        engagement_type: "like",
-        segmentId: topicEngData.topic_id,
-        customerId: contact_id,
-        posterName: getPosterName(post),
-        posterProfile: getPosterProfile(post),
-        postUrl: getPostUrl(post),
-        postId: getPostId(post),
-        isAutoPost: autoPostEnabled,
-      },
+      payload: activityPayload,
     });
+
     postsLiked++;
     updateStats();
+    
+    logger.success('LIKE_POST_SUCCESS', 'Post liked successfully', {
+      postId: getPostId(post),
+      postsLiked,
+      posterName: getPosterName(post),
+      contactTypeId
+    }, 'topicList.js');
+
   } catch (e) {
-    console.error("Error liking the post: ", e);
+    logger.error('LIKE_POST_ERROR', 'Error liking the post', {
+      error: e.message,
+      stack: e.stack,
+      postId: getPostId(post),
+      contactId: contact_id
+    }, 'topicList.js');
   }
 }
 
@@ -1128,34 +1389,59 @@ function addCommentButtonListner(post, commentInput, submitButton) {
               !topicEngData.topic_id ||
               !topicEngData.contact_id
             ) {
-              console.error(
-                "Missing required topic engagement data:",
-                topicEngData
-              );
+              logger.error('COMMENT_ACTIVITY_MISSING_DATA', 'Missing required topic engagement data for comment activity', {
+                hasBusinessId: !!topicEngData.business_id,
+                hasTopicId: !!topicEngData.topic_id,
+                hasContactId: !!topicEngData.contact_id,
+                topicEngData,
+                postId: getPostId(post)
+              }, 'topicList.js');
               return;
             }
+
+            const commentActivityPayload = {
+              activityId: topicEngData?.last_activity_id,
+              isCreate: topicEngData?.engagement_types
+                ? !topicEngData.engagement_types.like
+                : true,
+              businessId: topicEngData?.business_id,
+              engagement_type: "comment",
+              segmentId: topicEngData.topic_id,
+              customerId: topicEngData.contact_id,
+              posterName: getPosterName(post),
+              posterProfile: getPosterProfile(post),
+              postUrl: getPostUrl(post),
+              postId: getPostId(post),
+              isAutoPost: true,
+              comment: commentText,
+            };
+
+            logger.activityAPI.start('Making comment activity API call', {
+              engagementType: 'comment',
+              postId: getPostId(post),
+              businessId: topicEngData.business_id,
+              customerId: topicEngData.contact_id,
+              commentLength: commentText ? commentText.length : 0,
+              commentPreview: commentText ? commentText.substring(0, 50) + '...' : 'No comment',
+              posterName: getPosterName(post),
+              isAutoPost: true,
+              hasLastActivityId: !!topicEngData?.last_activity_id
+            });
+
             await chrome.runtime.sendMessage({
               action: "MAKE_ACTIVITY_API_CALL",
-              payload: {
-                activityId: topicEngData?.last_activity_id, // Use the new function here
-                isCreate: topicEngData?.engagement_types
-                  ? !topicEngData.engagement_types.like
-                  : true,
-                businessId: topicEngData?.business_id,
-                engagement_type: "comment", // Assuming only comments for now
-                segmentId: topicEngData.topic_id,
-                customerId: topicEngData.contact_id,
-                posterName: getPosterName(post),
-                posterProfile: getPosterProfile(post),
-                postUrl: getPostUrl(post),
-                postId: getPostId(post),
-
-                isAutoPost: true,
-                comment: commentText,
-              },
+              payload: commentActivityPayload,
             });
+
             commentsPosted++;
             updateStats();
+
+            logger.activityAPI.success('Comment activity API call completed', {
+              postId: getPostId(post),
+              commentsPosted,
+              commentLength: commentText.length,
+              customerId: topicEngData.contact_id
+            });
 
             // await getCommentUrl(post);
           } else {
@@ -1175,19 +1461,37 @@ function addCommentButtonListner(post, commentInput, submitButton) {
   }
 }
 
-async function postComment(post, comment) {
+async function postComment(post, comment, contact_id) {
   try {
+    logger.info('POST_COMMENT_START', 'Starting comment posting process', {
+      hasPost: !!post,
+      commentLength: comment ? comment.length : 0,
+      commentPreview: comment ? comment.substring(0, 50) + '...' : 'No comment',
+      contactId: contact_id,
+      postId: getPostId(post),
+      autoPostEnabled
+    }, 'topicList.js');
+
     // Find comment input field
     const commentButton =
       post.querySelector(SELECTORS.commentButton[0]) ||
       post.querySelector(SELECTORS.commentButton[1]);
 
     if (!commentButton) {
+      logger.debug('COMMENT_BUTTON_NOT_FOUND', 'Comment button not found, trying to open comment section', {
+        postId: getPostId(post),
+        selectors: SELECTORS.commentButton
+      }, 'topicList.js');
+
       // Try to open comment section first
       const openCommentButton = post.querySelector(
         SELECTORS.openCommentButton[1]
       );
       if (openCommentButton) {
+        logger.debug('OPENING_COMMENT_SECTION', 'Opening comment section', {
+          postId: getPostId(post)
+        }, 'topicList.js');
+
         simulateMouseClick(openCommentButton);
 
         // Wait for comment section to load
@@ -1197,6 +1501,7 @@ async function postComment(post, comment) {
       }
     }
 
+    // Clean comment text
     if (comment[0] === '"') {
       comment = comment.slice(1, -1);
     } else if (comment[comment.length - 1] === '"') {
@@ -1207,14 +1512,28 @@ async function postComment(post, comment) {
       comment = comment.slice(0, -1);
     }
 
+    logger.debug('COMMENT_CLEANED', 'Comment text cleaned', {
+      finalCommentLength: comment.length,
+      finalComment: comment.substring(0, 100) + (comment.length > 100 ? '...' : '')
+    }, 'topicList.js');
+
     // Find comment input after opening comments
     const commentInput =
       post.querySelector(SELECTORS.commentInput[0]) ||
       post.querySelector(SELECTORS.commentInput[1]);
 
     if (!commentInput) {
+      logger.error('COMMENT_INPUT_NOT_FOUND', 'Comment input not found', {
+        postId: getPostId(post),
+        selectors: SELECTORS.commentInput
+      }, 'topicList.js');
       throw new Error("Comment input or submit button not found");
     }
+
+    logger.debug('COMMENT_INPUT_FOUND', 'Comment input found, typing comment', {
+      postId: getPostId(post),
+      inputType: commentInput.tagName
+    }, 'topicList.js');
 
     // Type comment with human-like delays
     await setCommentInputValue(commentInput, comment);
@@ -1231,6 +1550,13 @@ async function postComment(post, comment) {
       const pollingTimeout = 5000; // Max time to wait for the button (5 seconds)
       const pollInterval = 500; // Check every 500ms
       let elapsedTime = 0;
+
+      logger.debug('SUBMIT_BUTTON_POLLING', 'Polling for submit button', {
+        postId: getPostId(post),
+        selectors: submitButtonSelectors,
+        pollingTimeout,
+        pollInterval
+      }, 'topicList.js');
 
       // Poll for the submit button to appear and be enabled
       while (!submitButton && elapsedTime < pollingTimeout) {
@@ -1254,16 +1580,22 @@ async function postComment(post, comment) {
     }
 
     if (!submitButton) {
-      console.error(
-        `Comment submit button not found or not enabled for post ${getPostId(
-          post
-        )} after polling. Selectors attempted:`,
-        submitButtonSelectors
-      );
+      logger.error('SUBMIT_BUTTON_NOT_FOUND', 'Submit button not found or not enabled after polling', {
+        postId: getPostId(post),
+        selectors: submitButtonSelectors,
+        elapsedTime: pollingTimeout
+      }, 'topicList.js');
       throw new Error(
         "Comment submit button not found or not enabled after polling"
       );
     }
+
+    logger.debug('SUBMIT_BUTTON_FOUND', 'Submit button found and ready', {
+      postId: getPostId(post),
+      buttonText: submitButton.textContent?.trim(),
+      isDisabled: submitButton.disabled,
+      ariaDisabled: submitButton.getAttribute("aria-disabled")
+    }, 'topicList.js');
 
     // Short delay before submitting
     await new Promise(
@@ -1278,37 +1610,54 @@ async function postComment(post, comment) {
       (submitButton.disabled ||
         submitButton.getAttribute("aria-disabled") === "true")
     ) {
-      console.warn(
-        `Submit button for post ${getPostId(
-          post
-        )} is disabled before auto-post attempt. The input simulation might not have fully enabled it. Consider using simulateTyping for more robust interaction.`
-      );
+      logger.warn('SUBMIT_BUTTON_DISABLED', 'Submit button is disabled before auto-post attempt', {
+        postId: getPostId(post),
+        disabled: submitButton.disabled,
+        ariaDisabled: submitButton.getAttribute("aria-disabled")
+      }, 'topicList.js');
     }
 
     if (autoPostEnabled) {
+      logger.info('AUTO_POSTING_COMMENT', 'Auto-posting comment', {
+        postId: getPostId(post),
+        commentLength: comment.length
+      }, 'topicList.js');
       // Click submit button
       simulateMouseClick(submitButton);
     }
+
     // Set next engagement time after successful comment
     setNextEngagementTime(minDelay, maxDelay);
+    
+    logger.success('POST_COMMENT_SUCCESS', 'Comment posted successfully', {
+      postId: getPostId(post),
+      commentLength: comment.length,
+      autoPosted: autoPostEnabled,
+      contactId: contact_id
+    }, 'topicList.js');
+
     return true;
   } catch (error) {
-    console.error("Error posting comment:", error);
+    logger.error('POST_COMMENT_ERROR', 'Error posting comment', {
+      error: error.message,
+      stack: error.stack,
+      postId: getPostId(post),
+      commentLength: comment ? comment.length : 0,
+      contactId: contact_id
+    }, 'topicList.js');
     return false;
   }
 }
 
 // Update stats in storage
-function updateStats() {
-  chrome.storage.local.set({
-    commentsPosted: commentsPosted,
-    postsScanned: postsScanned,
-    postsLiked: postsLiked,
-  });
-}
 
 // Helper function to check if post is already engaged via API
 async function checkIfPostEngaged(postId) {
+  logger.info('CHECK_POST_ENGAGED', 'Checking if post is already engaged', {
+    postId,
+    timestamp: new Date().toISOString()
+  }, 'topicList.js');
+
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(
       {
@@ -1316,23 +1665,37 @@ async function checkIfPostEngaged(postId) {
         postId: postId,
       },
       (response) => {
-        console.log(`Response from background for post ${postId}:`, response);
+        logger.debug('ENGAGEMENT_CHECK_RESPONSE', 'Background response received', {
+          postId,
+          hasResponse: !!response,
+          hasData: !!response?.data,
+          dataError: response?.data?.error
+        }, 'topicList.js');
 
         // Check response.data.error to determine engagement status
         if (response && response.data) {
-          console.log("response 1");
           if (response.data.error === false) {
-            console.log("response 2");
+            logger.info('POST_NOT_ENGAGED', 'Post is not engaged (can proceed)', {
+              postId
+            }, 'topicList.js');
             resolve(false); // Not engaged when error is false
           } else if (response.data.error === true) {
-            console.log("response 3");
+            logger.warn('POST_ALREADY_ENGAGED', 'Post is already engaged (skip)', {
+              postId
+            }, 'topicList.js');
             resolve(true); // Engaged when error is true
           } else {
-            console.log("response 4");
+            logger.warn('ENGAGEMENT_STATUS_UNDEFINED', 'Engagement status undefined, defaulting to not engaged', {
+              postId,
+              errorValue: response.data.error
+            }, 'topicList.js');
             resolve(false); // Default to not engaged if error property is undefined
           }
         } else {
-          console.log("response 5");
+          logger.warn('NO_ENGAGEMENT_DATA', 'No engagement data received, defaulting to not engaged', {
+            postId,
+            response
+          }, 'topicList.js');
           resolve(false); // Default to not engaged if no data
         }
       }
@@ -1342,8 +1705,21 @@ async function checkIfPostEngaged(postId) {
 
 async function checkPostRelevanceAPIpost(postContent) {
   try {
+    logger.chatGPT.start('Starting post relevance check', {
+      postContentLength: postContent ? postContent.length : 0,
+      postPreview: postContent ? postContent.substring(0, 100) + '...' : 'No content',
+      timestamp: new Date().toISOString()
+    });
+
     const topicEngData = await getFromChromeStorage("topic_eng_data", {});
-    if (!topicEngData?.goal_prompt) return null;
+    if (!topicEngData?.goal_prompt) {
+      logger.warn('NO_GOAL_PROMPT', 'No goal prompt found in topic engagement data', {
+        hasTopicEngData: !!topicEngData,
+        topicEngDataKeys: topicEngData ? Object.keys(topicEngData) : []
+      }, 'topicList.js');
+      return null;
+    }
+
     const userPrompt = `BUSINESS GOAL: ${topicEngData?.goal_prompt}\nLINKEDIN POST: ${postContent}`;
     const body = JSON.stringify({
       model: "llama3.1:latest",
@@ -1353,6 +1729,14 @@ async function checkPostRelevanceAPIpost(postContent) {
       ],
       options: { max_token: 100, repeat_penalty: 1.2, temperature: 0.7 },
     });
+
+    logger.info('RELEVANCE_API_REQUEST', 'Making relevance API request', {
+      goalPromptLength: topicEngData.goal_prompt.length,
+      userPromptLength: userPrompt.length,
+      bodySize: body.length,
+      model: 'llama3.1:latest'
+    }, 'topicList.js');
+
     const serverUrl = `${APIURL}/ai/chat`;
     const data = await callApi({
       action: "API_POST_GENERATE_MESSAGE",
@@ -1360,305 +1744,129 @@ async function checkPostRelevanceAPIpost(postContent) {
       method: "POST",
       body,
     });
-    return data?.data?.data || null;
+
+    const relevanceResult = data?.data?.data || null;
+    
+    logger.chatGPT.success('Post relevance check completed', {
+      hasResult: !!relevanceResult,
+      resultLength: relevanceResult ? relevanceResult.length : 0,
+      result: relevanceResult ? relevanceResult.substring(0, 200) + '...' : 'No result',
+      serverUrl
+    });
+
+    return relevanceResult;
   } catch (error) {
-    console.error("Error checking post relevance:", error);
+    logger.chatGPT.error('Error checking post relevance', {
+      error: error.message,
+      stack: error.stack,
+      postContentLength: postContent ? postContent.length : 0
+    });
     return null;
   }
 }
-
 async function engageWithFirstScannedPost() {
   console.log(
-    `=== engageWithFirstScannedPost ENTRY === apiPageStart: ${apiPageStart}`
+    "[engageWithFirstScannedPost] === START === apiPageStart:",
+    apiPageStart
   );
 
-  if (postsLiked >= dailyLimit || commentsPosted >= dailyLimit || connectionSent >= dailyLimit) {
-    console.log("Daily limit reached, exiting");
-    chrome.storage.local.get("limitNotificationShown", function (data) {
-      if (!data.limitNotificationShown) {
-        showNotification(
-          `Congratulations! You have achieved your daily goal of ${dailyLimit} interactions over posts.`,
-          "success"
-        );
-        chrome.storage.local.set({ limitNotificationShown: true });
-      }
-    });
+  if (
+    postsLiked >= dailyLimit ||
+    commentsPosted >= dailyLimit ||
+    connectionSent >= dailyLimit
+  ) {
+    console.log("[engageWithFirstScannedPost] Daily limit reached");
     return "DAILY_LIMIT_REACHED";
   }
 
   if (window.__mp_engaged_specific_post) {
-    console.log(
-      "Already processing, exiting due to __mp_engaged_specific_post flag"
-    );
+    console.log("[engageWithFirstScannedPost] Already processing, exiting");
     return "ALREADY_PROCESSING";
   }
 
   window.__mp_engaged_specific_post = true;
-  console.log(
-    `Set __mp_engaged_specific_post to true, proceeding with apiPageStart: ${apiPageStart}`
-  );
+  console.log("[engageWithFirstScannedPost] Flag set, proceeding");
 
   SELECTORS = await getSelectors();
+  console.log("[engageWithFirstScannedPost] SELECTORS loaded:", SELECTORS);
+
   if (!SELECTORS) {
-    showNotification(
-      "Failed to load extension selectors. Please try again later!",
-      "warning"
-    );
+    console.log("[engageWithFirstScannedPost] No SELECTORS found, aborting");
     return "SELECTORS_FAILED";
   }
 
-  // For /search/results/content, use API with dynamic parameters
   if (window.location.pathname?.startsWith("/search/results/content")) {
-    console.log("Processing search results page with API");
+    console.log("[engageWithFirstScannedPost] On search results page");
+
     try {
-      // Only wait on the FIRST page (page 0), skip wait on subsequent pages
       if (apiPageStart === 0) {
-        console.log("First page - waiting for next engagement timing");
+        console.log(
+          "[engageWithFirstScannedPost] Waiting before engagement..."
+        );
         await waitForNextEngagement(minDelay, maxDelay);
-      } else {
-        console.log(
-          `Page ${apiPageStart} - skipping wait for faster pagination`
-        );
       }
 
-      let foundPostId = null;
-      let allPostsProcessed = true; // Track if all posts are processed
-
-      // Fetch posts with current page start
-      console.log(`Fetching posts with apiPageStart: ${apiPageStart}`);
       const posts = await fetchPostsFromAPI(apiPageStart);
-      console.log({ posts });
-      console.log(`Fetched ${posts.length} ${posts} posts from API`);
+      console.log("[engageWithFirstScannedPost] Posts fetched:", posts?.length);
+
+      const newPosts = posts.filter((p) => !processedPostIds.has(p.postId));
       console.log(
-        `API Response for start=${apiPageStart}:`,
-        posts.map((p) => ({
-          postId: p.postId,
-          content: p.content.substring(0, 50) + "...",
-        }))
+        "[engageWithFirstScannedPost] New posts after filtering:",
+        newPosts.length
       );
 
-      if (!posts.length) {
-        console.log("No posts found, redirecting");
-        showNotification(
-          "No eligible and relevant post found to engage.",
-          "warning"
-        );
-        isApiPaginating = false;
-        processedPostIds.clear();
-        chrome.runtime.sendMessage({
-          action: "DELAYED_FEED_REDIRECT",
-          minDelay,
-          maxDelay,
-          url: await getRandomTopicUrl(),
-        });
-        return "NO_POSTS_FOUND";
-      }
-
-      // Filter out already processed posts to avoid duplicates
-      const newPosts = posts.filter(
-        (post) => !processedPostIds.has(post.postId)
-      );
-      console.log(
-        `Found ${newPosts.length} new posts after filtering ${
-          posts.length - newPosts.length
-        } duplicates`
-      );
-
-      if (!newPosts.length) {
-        console.log("No new posts found after filtering duplicates");
-        // If no new posts, try increasing the start parameter more aggressively
-        apiPageStart += 1; // Skip further ahead
-
-        if (apiPageStart >= MAX_API_PAGES) {
-          console.log("Exhausted pagination attempts, redirecting");
-          isApiPaginating = false;
-          processedPostIds.clear();
-          apiPageStart = 0;
-          chrome.runtime.sendMessage({
-            action: "DELAYED_FEED_REDIRECT",
-            minDelay,
-            maxDelay,
-            url: await getRandomTopicUrl(),
-          });
-          return "NO_NEW_POSTS";
-        }
-
-        // Try next page immediately
-        window.__mp_engaged_specific_post = false;
-        return await engageWithFirstScannedPost();
-      }
-
-      // Process only new posts
       for (const post of newPosts) {
-        // Add to processed set immediately to prevent reprocessing
+        console.log(
+          "[engageWithFirstScannedPost] Processing postId:",
+          post.postId
+        );
         processedPostIds.add(post.postId);
-        await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(10000, 15000)) // Shorter delay for pagination
-        );
-        console.log(`Processing new post ${post.postId}`);
-        const postUrn = "urn:li:activity:" + post.postId;
-        const engaged = await checkIfPostEngaged(postUrn);
-        console.log(`Post ${post.postId} engagement status:`, engaged);
 
-        // If engaged = false, means already engaged (skip)
-        // If engaged = true, means not engaged yet (check relevance)
+        const engaged = await checkIfPostEngaged(
+          "urn:li:activity:" + post.postId
+        );
+        console.log("[engageWithFirstScannedPost] Engagement status:", engaged);
+
         if (!engaged) {
-          console.log(`Post ${post.postId} already engaged, skipping.`);
-          continue; // This post is processed (already engaged)
+          console.log("[engageWithFirstScannedPost] Already engaged, skipping");
+          continue;
         }
-        await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(10000, 15000)) // Shorter delay for pagination
-        );
-        // Post is not engaged, check relevance
-        console.log(`Checking relevance for post ${post.postId}`);
+
         const relevanceResult = await checkPostRelevanceAPIpost(post.content);
-        const relevanceText = String(relevanceResult || "")
-          .toLowerCase()
-          .trim();
-        const NOT_RELEVANT_REGEX = /\bnot relevant\b/;
-        const RELEVANT_REGEX = /\brelevant\b/;
-
-        console.log(`Post ${post.postId} relevance result:`, relevanceResult);
-
-        if (
-          !relevanceResult ||
-          relevanceResult === null ||
-          relevanceText === "" ||
-          NOT_RELEVANT_REGEX.test(relevanceText)
-        ) {
-          console.log(`Post ${post.postId} is not relevant, skipping...`);
-          continue; // This post is processed (not relevant)
-        }
-
-        if (RELEVANT_REGEX.test(relevanceText)) {
-          console.log(`Found relevant post ${post.postId} to engage with!`);
-          foundPostId = post.postId;
-          allPostsProcessed = false; // We found a post to engage, so not all processed
-          break;
-        }
-      }
-
-      if (foundPostId) {
-        console.log(`Engaging with post ${foundPostId}`);
-        // Reset counters and clear processed posts when we find a post to engage with
-        apiPageStart = 0;
-        processedPostIds.clear(); // Clear the processed posts set
-        isApiPaginating = false;
-        await new Promise((resolve) =>
-          setTimeout(resolve, getRandomDelay(10000, 15000))
-        );
-        const postUrn = `urn:li:activity:${foundPostId}`;
-        const postUrl = `https://www.linkedin.com/feed/update/${postUrn}`;
-        console.log(`Redirecting to post URL: ${postUrl}`);
-        window.location.href = postUrl;
-        return "POST_FOUND";
-      }
-
-      // Only increment page start if ALL posts were processed (engaged or not relevant)
-      if (allPostsProcessed) {
-        apiPageStart += 1; // Increment by 3 for next batch of posts
         console.log(
-          `All posts on page processed. Moving to next page start: ${apiPageStart}`
+          "[engageWithFirstScannedPost] Relevance result:",
+          relevanceResult
         );
 
-        // Check if we've reached the maximum page limit
-        if (apiPageStart >= MAX_API_PAGES) {
+        if (String(relevanceResult).toLowerCase().includes("relevant")) {
           console.log(
-            `Reached maximum page limit. Redirecting to random topic.`
+            "[engageWithFirstScannedPost] Found relevant post:",
+            post.postId
           );
-          showNotification(
-            `Checked ${MAX_API_PAGES} pages, no relevant posts found.`,
-            "info"
-          );
-
-          // Reset counters and clear processed posts
-          apiPageStart = 0;
-          processedPostIds.clear();
-          isApiPaginating = false;
-
-          chrome.runtime.sendMessage({
-            action: "DELAYED_FEED_REDIRECT",
-            minDelay,
-            maxDelay,
-            url: await getRandomTopicUrl(),
-          });
-          return "MAX_PAGES_REACHED";
-        }
-
-        // Set pagination flag to prevent startScanning interference
-        isApiPaginating = true;
-
-        // Reset the flag to allow recursive processing
-        window.__mp_engaged_specific_post = false;
-
-        console.log("About to wait before recursive call...");
-        await new Promise(
-          (resolve) => setTimeout(resolve, getRandomDelay(30000, 40000)) // Shorter delay for pagination
-        );
-
-        console.log(
-          "Wait completed, about to call engageWithFirstScannedPost recursively..."
-        );
-        console.log("Current URL:", window.location.href);
-        console.log("Current pathname:", window.location.pathname);
-
-        try {
-          const result = await engageWithFirstScannedPost(); // Recursive call for next page
-          console.log(
-            "Recursive call to engageWithFirstScannedPost completed with result:",
-            result
-          );
-          return result;
-        } catch (recursiveError) {
-          console.error(
-            "Error in recursive engageWithFirstScannedPost call:",
-            recursiveError
-          );
-          isApiPaginating = false;
-          throw recursiveError;
+          window.location.href = `https://www.linkedin.com/feed/update/urn:li:activity:${post.postId}`;
+          return "POST_FOUND";
         }
       }
     } catch (e) {
-      console.error("Error in search results processing:", e);
-      // Reset counters on error
-      apiPageStart = 0;
-      processedPostIds.clear();
-      isApiPaginating = false;
-
-      showNotification("Error finding post to engage.", "error");
-      chrome.runtime.sendMessage({
-        action: "DELAYED_FEED_REDIRECT",
-        minDelay,
-        maxDelay,
-        url: await getRandomTopicUrl(),
-      });
-      return "ERROR_OCCURRED";
+      console.log(
+        "[engageWithFirstScannedPost] [ERROR] API processing failed:",
+        e
+      );
     }
   }
 
-  // For individual post pages, continue with existing DOM engagement logic
   if (window.location.pathname.startsWith("/feed/update/")) {
-    console.log("Processing individual post page");
+    console.log("[engageWithFirstScannedPost] On individual post page");
     try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, getRandomDelay(10000, 12000))
-      );
       await scanPosts();
       return "POST_PAGE_PROCESSED";
     } catch (e) {
-      console.error("Error engaging with post:", e);
-      showNotification("Error engaging with post.", "error");
-      chrome.runtime.sendMessage({
-        action: "DELAYED_FEED_REDIRECT",
-        minDelay,
-        maxDelay,
-        url: await getRandomTopicUrl(),
-      });
+      console.log("[engageWithFirstScannedPost] [ERROR] scanPosts failed:", e);
       return "POST_ENGAGEMENT_ERROR";
     }
   }
 
-  console.log("No matching page type found");
+  console.log("[engageWithFirstScannedPost] No matching page type, exiting");
   return "NO_ACTION_TAKEN";
 }
 
@@ -1701,6 +1909,13 @@ function shouldInitialize() {
   return isLinkedIn && (isFeed || isSearchResults);
 }
 
+function updateStats() {
+  chrome.storage.local.set({
+    commentsPosted: commentsPosted,
+
+    postsLiked: postsLiked,
+  });
+}
 // Initial load
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initialize);

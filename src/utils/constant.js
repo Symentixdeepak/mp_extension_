@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
   commentLength: "15",
   autoPostEnabled: true,
   dailyLimit: 20,
-  minDelay: 8 * ONE_MINUTE,
+  minDelay: 5 * ONE_MINUTE,
   maxDelay: 15 * ONE_MINUTE,
   likePostEnabled: true,
   userPrompt: `Match the tone without deviation;
@@ -126,8 +126,8 @@ const MaxTokens = {
   long: 250,
 };
 
-const APIURL = `https://dev.manageplus.io/admin/api`;
-const WEBURL = `https://dev.manageplus.io`;
+const APIURL = `https://app.manageplus.io/admin/api`;
+const WEBURL = `https://app.manageplus.io`;
 
 module.exports = {
   DEFAULT_SETTINGS,

@@ -589,12 +589,12 @@ async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
 
   // 3. Business Goal Field
   const businessGoalLabel = document.createElement("label");
-  businessGoalLabel.textContent = "Business Goal *";
+  businessGoalLabel.textContent = "Business Goal Prompt*";
   businessGoalLabel.className = "mp-topic-drawer-label";
   const businessGoalSubLabel = document.createElement("span");
   businessGoalSubLabel.className = "mp-topic-drawer-sublabel";
   businessGoalSubLabel.textContent =
-    "Define your goal to determine which posts to engage with based on your target audience and business objectives";
+    "Your Business Goal Prompt: This prompt helps AI analyze posts before engagement. Only posts that match your business goal will be engaged with, ensuring targeted and relevant interactions.";
 
   const businessGoalTextarea = document.createElement("textarea");
   businessGoalTextarea.className = "mp-topic-drawer-textarea small";
@@ -680,12 +680,12 @@ async function showAddTopicPopover(buttonEl, handleAddTopicToList) {
 
   // 5. Profile Connection Prompt Field
   const profilePromptLabel = document.createElement("label");
-  profilePromptLabel.textContent = "Profile Connection Prompt (Optional)";
+  profilePromptLabel.textContent = "Profile Connection Request Prompt (Optional)";
   profilePromptLabel.className = "mp-topic-drawer-label";
   const profilePromptSubLabel = document.createElement("span");
   profilePromptSubLabel.className = "mp-topic-drawer-sublabel";
   profilePromptSubLabel.textContent =
-    "Optional: Define criteria for connection requests. If not provided, connections will be sent without AI verification. Add specific criteria to filter connection requests.";
+    "Smart Connection Filtering: AI will analyze user profiles (name, job title, about section) before sending connection requests. If criteria match, connection is sent. If empty, all connections are sent without filtering.";
 
   const profilePromptTextarea = document.createElement("textarea");
   profilePromptTextarea.className = "mp-topic-drawer-textarea medium";
@@ -1521,6 +1521,68 @@ function checkForNavigation(checkType) {
 (async function () {
   let hasChecked = false;
 
+  // Function to check if we're on the logged-in user's own profile
+  function isOwnProfile() {
+    // Method 1: Check for profile edit buttons that only appear on own profile
+    const editButtons = [
+      '[aria-label*="edit" i][aria-label*="profile" i]',
+      '[data-control-name*="edit_profile"]',
+      '.pv-s-profile-actions--edit',
+      '.artdeco-button[aria-label*="Edit"]',
+      '[data-view-name*="profile-edit"]'
+    ];
+    
+    for (const selector of editButtons) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via edit button:", selector);
+        return true;
+      }
+    }
+
+    // Method 2: Check URL patterns that indicate own profile
+    const currentUrl = window.location.href;
+    
+    // Profile settings/edit pages
+    if (currentUrl.includes('/public-profile/settings') || 
+        currentUrl.includes('/me/profile-views') ||
+        currentUrl.includes('/mypreferences') ||
+        currentUrl.includes('/profile/edit')) {
+      console.log("✅ Own profile detected via settings/edit URL");
+      return true;
+    }
+
+    // Method 3: Look for "View profile" menu that typically appears on own profile
+    const viewProfileElements = [
+      '[data-control-name="view_profile"]',
+      '[href*="/public-profile/settings"]',
+      '.pv-s-profile-actions [href*="public-profile"]'
+    ];
+    
+    for (const selector of viewProfileElements) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via view profile element:", selector);
+        return true;
+      }
+    }
+
+    // Method 4: Check for profile visibility settings that only appear on own profile
+    const profileSettingsIndicators = [
+      '[data-control-name*="public_profile"]',
+      '.pv-profile-section__see-more-inline',
+      '.pv-profile-header__visibility-dropdown'
+    ];
+
+    for (const selector of profileSettingsIndicators) {
+      if (document.querySelector(selector)) {
+        console.log("✅ Own profile detected via settings indicator:", selector);
+        return true;
+      }
+    }
+
+    console.log("❌ Not on own profile - this appears to be someone else's profile");
+    return false;
+  }
+
   // Function to extract LinkedIn vanity name from DOM
   function extractLinkedInVanityName() {
     // Quick win: URL extraction
@@ -1572,14 +1634,20 @@ function checkForNavigation(checkType) {
     return null;
   }
 
-  // Check and update user_info only if not already stored
+  // Check and update user_info only if we're on the logged-in user's own profile
   function checkAndUpdateUserInfo() {
     if (hasChecked) return; // Don't check again if already done
+
+    // IMPORTANT: Only extract user info if we're on the logged-in user's own profile
+    if (!isOwnProfile()) {
+      console.log("🚫 Skipping user_info extraction - not on own profile");
+      return;
+    }
 
     const vanityName = extractLinkedInVanityName();
     if (!vanityName) return;
 
-    console.log("🔍 Found vanity name:", vanityName);
+    console.log("🔍 Found vanity name on own profile:", vanityName);
 
     chrome.storage.local.get(["user_info"], (result) => {
       if (chrome.runtime.lastError) {
@@ -1592,13 +1660,14 @@ function checkForNavigation(checkType) {
         chrome.storage.local.set({ user_info: vanityName }, () => {
           if (!chrome.runtime.lastError) {
             if (!result.user_info) {
-              console.log("✅ user_info saved:", vanityName);
+              console.log("✅ user_info saved (own profile):", vanityName);
             } else {
               console.log(
                 "🔄 user_info updated from",
                 result.user_info,
                 "to",
-                vanityName
+                vanityName,
+                "(own profile)"
               );
             }
             hasChecked = true; // Mark as checked so we don't do it again

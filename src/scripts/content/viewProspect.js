@@ -810,7 +810,7 @@ Provide a match analysis with percentage and reasoning.`;
       });
   }
 
-  // Main showImportDrawer function with all accordions
+  // Main showImportDrawer function with connection request and profile match accordions only
   function showImportDrawer() {
     injectDrawerStyles();
     // Remove any existing drawer
@@ -846,7 +846,258 @@ Provide a match analysis with percentage and reasoning.`;
     logo.alt = "ManagePlus Logo";
     logo.className = "mp-import-drawer-logo";
     const title = document.createElement("span");
-    title.textContent = "ManagePlus Tools";
+    title.textContent = "ManagePlus Tools - Test Prompts";
+    title.className = "mp-import-drawer-title";
+    logoTitle.appendChild(logo);
+    logoTitle.appendChild(title);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6L14 14M14 6L6 14" stroke="#222" stroke-width="2" stroke-linecap="round"/></svg>`;
+    closeBtn.className = "mp-import-drawer-close";
+    closeBtn.onclick = closeDrawer;
+    header.appendChild(logoTitle);
+    header.appendChild(closeBtn);
+    drawer.appendChild(header);
+
+    // Main content
+    const main = document.createElement("div");
+    main.className = "mp-import-drawer-main";
+
+    // User info
+    const userInfo = extractUserInfoWithExtras();
+    const userInfoDiv = document.createElement("div");
+    userInfoDiv.className = "mp-user-info";
+    userInfoDiv.innerHTML = `
+      <img class="mp-user-avatar" style="height:40px; width:40px; border-radius:50%; object-fit:cover; background:#f3f4f6;" src="${
+        userInfo.avatar
+      }" alt="${userInfo.name || "Avatar"}" 
+           onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(
+             userInfo.name || "User"
+           )}'">
+      <div class="mp-user-meta">
+        <h3>${userInfo.name}</h3>
+        <p style="font-size:12px;">${userInfo.current_job_title}</p>
+      </div>
+    `;
+    main.appendChild(userInfoDiv);
+
+    // Create Connection Message Accordion Content
+    const connectionContent = `
+      <div class="mp-connection-section">
+        <label class="mp-import-drawer-label">Connection Request Message Prompt</label>
+        <textarea id="mp-connection-textarea" class="mp-message-textarea" placeholder="Enter your prompt to generate message...">${
+          connectionReqUserImpportPrompt || ""
+        }</textarea>
+        <button type="button" id="mp-generate-connection-btn" class="mp-generate-btn">Generate Message</button>
+        <div id="mp-generated-connection" class="mp-generated-message">
+          <div id="mp-generated-connection-text" class="mp-generated-text"></div>
+          <button type="button" id="mp-copy-connection-btn" class="mp-copy-btn">Copy Message</button>
+        </div>
+      </div>
+    `;
+
+    // Create Profile Match Accordion Content
+    const profileMatchContent = `
+      <div class="mp-profile-match-section">
+        <label class="mp-import-drawer-label">Profile Match Criteria Prompt</label>
+        <textarea id="mp-profile-match-textarea" class="mp-message-textarea" placeholder="Enter your criteria (e.g., 'Check if user is related to software industry', 'Looking for marketing professionals', etc.)"></textarea>
+        <button type="button" id="mp-generate-match-btn" class="mp-generate-btn">Analyze Profile</button>
+        <div id="mp-generated-match" class="mp-generated-message">
+          <div id="mp-generated-match-text" class="mp-generated-text"></div>
+          <button type="button" id="mp-copy-match-btn" class="mp-copy-btn">Copy Analysis</button>
+        </div>
+      </div>
+    `;
+
+    // Create accordions (removed import accordion)
+    const connectionAccordion = createAccordion(
+      "connection-message",
+      "Draft Connection Request Message",
+      connectionContent,
+      true
+    );
+    const profileMatchAccordion = createAccordion(
+      "profile-match",
+      "Profile Match",
+      profileMatchContent,
+      false
+    );
+
+    main.appendChild(connectionAccordion);
+    main.appendChild(profileMatchAccordion);
+
+    drawer.appendChild(main);
+    parent.appendChild(drawer);
+
+    // Animate in
+    setTimeout(() => {
+      drawer.classList.remove("mp-import-drawer-closed");
+      drawer.classList.add("mp-import-drawer-open");
+      overlayDiv.classList.remove("opacity-0");
+    }, 10);
+
+    // Close logic
+    function closeDrawer() {
+      drawer.classList.remove("mp-import-drawer-open");
+      drawer.classList.add("mp-import-drawer-closed");
+      overlayDiv.classList.add("opacity-0");
+      setTimeout(() => {
+        if (drawer.parentNode) drawer.remove();
+        if (overlayDiv.parentNode) overlayDiv.remove();
+      }, 300);
+    }
+
+    // Initialize Connection Message functionality
+    function initializeConnectionMessage() {
+      const generateBtn = document.getElementById("mp-generate-connection-btn");
+      const textarea = document.getElementById("mp-connection-textarea");
+      const generatedDiv = document.getElementById("mp-generated-connection");
+      const generatedText = document.getElementById(
+        "mp-generated-connection-text"
+      );
+      const copyBtn = document.getElementById("mp-copy-connection-btn");
+
+      generateBtn.onclick = async () => {
+        const userQuery = textarea.value.trim();
+
+        if (!userQuery) {
+          showNotification("Please enter your prompt first.", "error");
+          return;
+        }
+
+        generateBtn.disabled = true;
+        generateBtn.innerHTML =
+          '<span class="mp-import-spinner"></span> Generating...';
+
+        try {
+          const message = await generateConnectionRequestMessage(userQuery);
+
+          if (message) {
+            // textarea.value = message;
+            generatedText.textContent = message;
+            generatedDiv.classList.add("active");
+            showNotification("Connection message generated!", "success");
+          } else {
+            showNotification(
+              "Unable to generate message. Please try again.",
+              "error"
+            );
+          }
+        } catch (error) {
+          console.error("Error generating connection message:", error);
+          showNotification(
+            "Error generating message. Please try again.",
+            "error"
+          );
+        } finally {
+          generateBtn.disabled = false;
+          generateBtn.textContent = "Generate Message";
+        }
+      };
+
+      copyBtn.onclick = () => {
+        const text = generatedText.textContent;
+        if (text) {
+          copyToClipboard(text);
+        }
+      };
+    }
+
+    // Initialize Profile Match functionality
+    function initializeProfileMatch() {
+      const generateBtn = document.getElementById("mp-generate-match-btn");
+      const textarea = document.getElementById("mp-profile-match-textarea");
+      const generatedDiv = document.getElementById("mp-generated-match");
+      const generatedText = document.getElementById("mp-generated-match-text");
+      const copyBtn = document.getElementById("mp-copy-match-btn");
+
+      generateBtn.onclick = async () => {
+        const userQuery = textarea.value.trim();
+
+        if (!userQuery) {
+          showNotification("Please enter your criteria first.", "error");
+          return;
+        }
+
+        generateBtn.disabled = true;
+        generateBtn.innerHTML =
+          '<span class="mp-import-spinner"></span> Analyzing...';
+
+        try {
+          const analysis = await generateProfileMatch(userQuery);
+
+          if (analysis) {
+            generatedText.textContent = analysis;
+            generatedDiv.classList.add("active");
+            showNotification("Profile analysis completed!", "success");
+          } else {
+            showNotification(
+              "Unable to analyze profile. Please try again.",
+              "error"
+            );
+          }
+        } catch (error) {
+          console.error("Error generating profile match:", error);
+          showNotification(
+            "Error analyzing profile. Please try again.",
+            "error"
+          );
+        } finally {
+          generateBtn.disabled = false;
+          generateBtn.textContent = "Analyze Profile";
+        }
+      };
+
+      copyBtn.onclick = () => {
+        const text = generatedText.textContent;
+        if (text) {
+          copyToClipboard(text);
+        }
+      };
+    }
+
+    // Initialize accordion functionalities
+    initializeConnectionMessage();
+    initializeProfileMatch();
+  }
+
+  // New function for showing Import Prospect drawer only
+  function showImportProspectDrawer() {
+    injectDrawerStyles();
+    // Remove any existing drawer
+    const existing = document.getElementById("mp-import-prospect-drawer");
+    if (existing) existing.remove();
+    const overlay = document.getElementById("mp-import-prospect-overlay");
+    if (overlay) overlay.remove();
+
+    // Find main LinkedIn feed container
+    let parent = document.querySelector("div.feed-outlet, main, #main, body");
+    if (!parent) parent = document.body;
+
+    // Overlay
+    const overlayDiv = document.createElement("div");
+    overlayDiv.id = "mp-import-prospect-overlay";
+    overlayDiv.className = "mp-import-drawer-overlay";
+    overlayDiv.onclick = closeDrawer;
+    parent.appendChild(overlayDiv);
+
+    // Drawer
+    const drawer = document.createElement("div");
+    drawer.id = "mp-import-prospect-drawer";
+    drawer.className = "mp-import-drawer mp-import-drawer-closed";
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "mp-import-drawer-header";
+
+    const logoTitle = document.createElement("div");
+    logoTitle.className = "mp-import-drawer-logo-title";
+    const logo = document.createElement("img");
+    logo.src = chrome.runtime.getURL("assets/logo_48.png");
+    logo.alt = "ManagePlus Logo";
+    logo.className = "mp-import-drawer-logo";
+    const title = document.createElement("span");
+    title.textContent = "ManagePlus - Import Prospect";
     title.className = "mp-import-drawer-title";
     logoTitle.appendChild(logo);
     logoTitle.appendChild(title);
@@ -909,57 +1160,15 @@ Provide a match analysis with percentage and reasoning.`;
       </div>
     `;
 
-    // Create Connection Message Accordion Content
-    const connectionContent = `
-      <div class="mp-connection-section">
-        <label class="mp-import-drawer-label">Connection Request Message Prompt</label>
-        <textarea id="mp-connection-textarea" class="mp-message-textarea" placeholder="Enter your prompt to generate message...">${
-          connectionReqUserImpportPrompt || ""
-        }</textarea>
-        <button type="button" id="mp-generate-connection-btn" class="mp-generate-btn">Generate Message</button>
-        <div id="mp-generated-connection" class="mp-generated-message">
-          <div id="mp-generated-connection-text" class="mp-generated-text"></div>
-          <button type="button" id="mp-copy-connection-btn" class="mp-copy-btn">Copy Message</button>
-        </div>
-      </div>
-    `;
-
-    // Create Profile Match Accordion Content
-    const profileMatchContent = `
-      <div class="mp-profile-match-section">
-        <label class="mp-import-drawer-label">Profile Match Criteria Prompt</label>
-        <textarea id="mp-profile-match-textarea" class="mp-message-textarea" placeholder="Enter your criteria (e.g., 'Check if user is related to software industry', 'Looking for marketing professionals', etc.)"></textarea>
-        <button type="button" id="mp-generate-match-btn" class="mp-generate-btn">Analyze Profile</button>
-        <div id="mp-generated-match" class="mp-generated-message">
-          <div id="mp-generated-match-text" class="mp-generated-text"></div>
-          <button type="button" id="mp-copy-match-btn" class="mp-copy-btn">Copy Analysis</button>
-        </div>
-      </div>
-    `;
-
-    // Create accordions
+    // Create accordion
     const importAccordion = createAccordion(
       "import-prospect",
       "Import Prospect",
       importContent,
       true
     );
-    const connectionAccordion = createAccordion(
-      "connection-message",
-      "Draft Connection Request Message",
-      connectionContent,
-      false
-    );
-    const profileMatchAccordion = createAccordion(
-      "profile-match",
-      "Profile Match",
-      profileMatchContent,
-      false
-    );
 
     main.appendChild(importAccordion);
-    main.appendChild(connectionAccordion);
-    main.appendChild(profileMatchAccordion);
 
     drawer.appendChild(main);
     parent.appendChild(drawer);
@@ -1336,119 +1545,8 @@ Provide a match analysis with percentage and reasoning.`;
       };
     }
 
-    // Initialize Connection Message functionality
-    function initializeConnectionMessage() {
-      const generateBtn = document.getElementById("mp-generate-connection-btn");
-      const textarea = document.getElementById("mp-connection-textarea");
-      const generatedDiv = document.getElementById("mp-generated-connection");
-      const generatedText = document.getElementById(
-        "mp-generated-connection-text"
-      );
-      const copyBtn = document.getElementById("mp-copy-connection-btn");
-
-      generateBtn.onclick = async () => {
-        const userQuery = textarea.value.trim();
-
-        if (!userQuery) {
-          showNotification("Please enter your prompt first.", "error");
-          return;
-        }
-
-        generateBtn.disabled = true;
-        generateBtn.innerHTML =
-          '<span class="mp-import-spinner"></span> Generating...';
-
-        try {
-          const message = await generateConnectionRequestMessage(userQuery);
-
-          if (message) {
-            // textarea.value = message;
-            generatedText.textContent = message;
-            generatedDiv.classList.add("active");
-            showNotification("Connection message generated!", "success");
-          } else {
-            showNotification(
-              "Unable to generate message. Please try again.",
-              "error"
-            );
-          }
-        } catch (error) {
-          console.error("Error generating connection message:", error);
-          showNotification(
-            "Error generating message. Please try again.",
-            "error"
-          );
-        } finally {
-          generateBtn.disabled = false;
-          generateBtn.textContent = "Generate Message";
-        }
-      };
-
-      copyBtn.onclick = () => {
-        const text = generatedText.textContent;
-        if (text) {
-          copyToClipboard(text);
-        }
-      };
-    }
-
-    // Initialize Profile Match functionality
-    function initializeProfileMatch() {
-      const generateBtn = document.getElementById("mp-generate-match-btn");
-      const textarea = document.getElementById("mp-profile-match-textarea");
-      const generatedDiv = document.getElementById("mp-generated-match");
-      const generatedText = document.getElementById("mp-generated-match-text");
-      const copyBtn = document.getElementById("mp-copy-match-btn");
-
-      generateBtn.onclick = async () => {
-        const userQuery = textarea.value.trim();
-
-        if (!userQuery) {
-          showNotification("Please enter your criteria first.", "error");
-          return;
-        }
-
-        generateBtn.disabled = true;
-        generateBtn.innerHTML =
-          '<span class="mp-import-spinner"></span> Analyzing...';
-
-        try {
-          const analysis = await generateProfileMatch(userQuery);
-
-          if (analysis) {
-            generatedText.textContent = analysis;
-            generatedDiv.classList.add("active");
-            showNotification("Profile analysis completed!", "success");
-          } else {
-            showNotification(
-              "Unable to analyze profile. Please try again.",
-              "error"
-            );
-          }
-        } catch (error) {
-          console.error("Error generating profile match:", error);
-          showNotification(
-            "Error analyzing profile. Please try again.",
-            "error"
-          );
-        } finally {
-          generateBtn.disabled = false;
-          generateBtn.textContent = "Analyze Profile";
-        }
-      };
-
-      copyBtn.onclick = () => {
-        const text = generatedText.textContent;
-        if (text) {
-          copyToClipboard(text);
-        }
-      };
-    }
-
-    // Initialize all accordion functionalities
+    // Initialize Import Prospect functionality
     initializeImportProspect();
-    initializeConnectionMessage();
-    initializeProfileMatch();
   }
 
   // Utility functions for button injection
@@ -1459,14 +1557,14 @@ Provide a match analysis with percentage and reasoning.`;
     );
   }
 
-  // Inject Import Prospect button
+  // Inject Import Prospect and Test Prompt buttons
   function injectImportButton() {
     if (!isLinkedInProfile()) {
       return;
     }
 
-    // Check if button already exists
-    if (document.querySelector("#mp-view-prospect-btn")) {
+    // Check if buttons already exist
+    if (document.querySelector("#mp-import-prospect-btn") || document.querySelector("#mp-test-prompt-btn")) {
       return;
     }
 
@@ -1485,12 +1583,13 @@ Provide a match analysis with percentage and reasoning.`;
 
     // Get the last div inside the previous div
     const lastDiv = divs[divs.length - 1];
-    if (!lastDiv || lastDiv.querySelector("#mp-view-prospect-btn")) return;
+    if (!lastDiv) return;
 
-    const btn = document.createElement("button");
-    btn.id = "mp-view-prospect-btn";
-    btn.textContent = "View Prospect";
-    btn.style.cssText = `
+    // Create Import Prospect button
+    const importBtn = document.createElement("button");
+    importBtn.id = "mp-import-prospect-btn";
+    importBtn.textContent = "Import Prospect";
+    importBtn.style.cssText = `
     background: #101112;
     color: #fff;
     padding: 6px 16px;
@@ -1502,12 +1601,34 @@ Provide a match analysis with percentage and reasoning.`;
     margin-left: 4px;
   `;
 
-    btn.onclick = (e) => {
+    importBtn.onclick = (e) => {
+      e.stopPropagation();
+      showImportProspectDrawer();
+    };
+
+    // Create Test Prompt button
+    const testBtn = document.createElement("button");
+    testBtn.id = "mp-test-prompt-btn";
+    testBtn.textContent = "Test Prompt";
+    testBtn.style.cssText = `
+    background: #101112;
+    color: #fff;
+    padding: 6px 16px;
+    border-radius: 25px;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    margin-left: 4px;
+  `;
+
+    testBtn.onclick = (e) => {
       e.stopPropagation();
       showImportDrawer();
     };
 
-    lastDiv.appendChild(btn);
+    lastDiv.appendChild(importBtn);
+    lastDiv.appendChild(testBtn);
   }
   // Profile page support functions
   function extractProfileInfoFromCustomCard() {
@@ -1559,39 +1680,59 @@ Provide a match analysis with percentage and reasoning.`;
     const customDiv = document.querySelector(".hAQynntdEFUsKEiwJQadisSUFbmMM");
     if (!customDiv) return;
 
-    if (customDiv.querySelector("#mp-profile-import-btn")) return;
+    if (customDiv.querySelector("#mp-profile-import-btn") || customDiv.querySelector("#mp-profile-test-btn")) return;
 
     const wrapper = document.createElement("div");
     wrapper.style.marginTop = "0px";
+    wrapper.style.display = "flex";
+    wrapper.style.gap = "8px";
 
-    const btn = document.createElement("button");
-    btn.id = "mp-profile-import-btn";
-    btn.type = "button";
-    btn.textContent = "Import Prospect";
-    btn.style.background = "#101112";
-    btn.style.color = "#fff";
-    btn.style.fontWeight = "500";
-    btn.style.fontSize = "14px";
-    btn.style.border = "none";
-    btn.style.borderRadius = "20px";
-    btn.style.marginRight = "10px";
-    btn.style.padding = "6px 12px 8px 12px";
-    btn.style.cursor = "pointer";
-    btn.style.transition = "background 0.18s";
+    // Create Import Prospect button
+    const importBtn = document.createElement("button");
+    importBtn.id = "mp-profile-import-btn";
+    importBtn.type = "button";
+    importBtn.textContent = "Import Prospect";
+    importBtn.style.background = "#101112";
+    importBtn.style.color = "#fff";
+    importBtn.style.fontWeight = "500";
+    importBtn.style.fontSize = "14px";
+    importBtn.style.border = "none";
+    importBtn.style.borderRadius = "20px";
+    importBtn.style.padding = "6px 12px 8px 12px";
+    importBtn.style.cursor = "pointer";
+    importBtn.style.transition = "background 0.18s";
 
-    btn.onclick = (e) => {
+    importBtn.onclick = (e) => {
       e.stopPropagation();
       const userInfo = extractProfileInfoFromCustomCard();
       if (!userInfo) return;
-      showImportDrawer({
-        querySelector: () => null,
-        textContent: "",
-        getAttribute: () => null,
-        ...userInfo,
-      });
+      showImportProspectDrawer();
     };
 
-    wrapper.appendChild(btn);
+    // Create Test Prompt button
+    const testBtn = document.createElement("button");
+    testBtn.id = "mp-profile-test-btn";
+    testBtn.type = "button";
+    testBtn.textContent = "Test Prompt";
+    testBtn.style.background = "#101112";
+    testBtn.style.color = "#fff";
+    testBtn.style.fontWeight = "500";
+    testBtn.style.fontSize = "14px";
+    testBtn.style.border = "none";
+    testBtn.style.borderRadius = "20px";
+    testBtn.style.padding = "6px 12px 8px 12px";
+    testBtn.style.cursor = "pointer";
+    testBtn.style.transition = "background 0.18s";
+
+    testBtn.onclick = (e) => {
+      e.stopPropagation();
+      const userInfo = extractProfileInfoFromCustomCard();
+      if (!userInfo) return;
+      showImportDrawer();
+    };
+
+    wrapper.appendChild(importBtn);
+    wrapper.appendChild(testBtn);
     customDiv.appendChild(wrapper);
   }
 
